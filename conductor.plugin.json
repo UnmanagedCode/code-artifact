@@ -1,0 +1,76 @@
+{
+  "id": "code-artifact",
+  "name": "Code Artifact",
+  "version": "0.1.0",
+  "pluginApi": 1,
+  "backend": { "start": "npm start", "healthPath": "/api/health", "readyWhen": "listening" },
+  "frontend": { "path": "/", "navLabel": "Artifacts" },
+  "mcp": {
+    "endpoint": "/api/mcp",
+    "timeoutMs": 120000,
+    "tools": [
+      {
+        "name": "publish_artifact",
+        "description": "Publish a file or directory as a new immutable, versioned artifact and get a link the user can open in cc. The kind is inferred from the source: a .md file is markdown; a .html file, or a directory/.tar.gz with a root index.html, is a static site; anything else is a downloadable file. Pass project when called from the conductor (its own project is not a user project).",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "path": { "type": "string", "minLength": 1, "maxLength": 4096, "description": "Absolute path of the file, directory or .tar.gz to publish." },
+            "title": { "type": "string", "minLength": 1, "maxLength": 200, "description": "Human title shown in the artifact list." },
+            "kind": { "type": "string", "enum": ["markdown", "static", "download", "app"], "description": "Override the inferred kind. \"app\" is not supported yet; use \"static\"." },
+            "project": { "type": "string", "pattern": "^[a-zA-Z0-9._-]+$", "maxLength": 100, "description": "Owning project. Defaults to the calling session's project; required from the conductor." },
+            "sessionId": { "type": "string", "minLength": 1, "maxLength": 200, "description": "Publishing session. Defaults to the calling session." }
+          },
+          "required": ["path", "title"]
+        }
+      },
+      {
+        "name": "update_artifact",
+        "description": "Publish a new version of an existing artifact from a new source. Earlier versions stay available. The source must be of the artifact's kind; the project cannot change.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "artifact": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,47}$", "description": "Artifact id." },
+            "path": { "type": "string", "minLength": 1, "maxLength": 4096, "description": "Absolute path of the new source." },
+            "title": { "type": "string", "minLength": 1, "maxLength": 200, "description": "New title; omit to keep the current one." },
+            "kind": { "type": "string", "enum": ["markdown", "static", "download", "app"], "description": "Pass the artifact's kind when the source would otherwise be inferred as another." },
+            "sessionId": { "type": "string", "minLength": 1, "maxLength": 200, "description": "Publishing session. Defaults to the calling session." }
+          },
+          "required": ["artifact", "path"]
+        }
+      },
+      {
+        "name": "list_artifacts",
+        "description": "List artifacts, newest first, optionally for one project or kind.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "project": { "type": "string", "pattern": "^[a-zA-Z0-9._-]+$", "maxLength": 100 },
+            "kind": { "type": "string", "enum": ["markdown", "static", "download", "app"] }
+          }
+        }
+      },
+      {
+        "name": "get_artifact",
+        "description": "Get one artifact's full record: every version with its deep link.",
+        "inputSchema": {
+          "type": "object",
+          "properties": { "artifact": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,47}$", "description": "Artifact id." } },
+          "required": ["artifact"]
+        }
+      },
+      {
+        "name": "delete_artifact",
+        "description": "Delete a whole artifact, or one version of it when version is given. The only remaining version cannot be deleted on its own.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "artifact": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,47}$", "description": "Artifact id." },
+            "version": { "type": "integer", "minimum": 1, "description": "Delete only this version." }
+          },
+          "required": ["artifact"]
+        }
+      }
+    ]
+  }
+}

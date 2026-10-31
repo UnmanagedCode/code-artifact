@@ -1,3 +1,7 @@
 node_modules
 .mutation/
 .DS_Store
+frontend/dist/
+frontend/.vite-cache/
+package-lock.json
+harness/playwright/out/
