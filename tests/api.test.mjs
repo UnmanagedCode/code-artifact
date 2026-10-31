@@ -5,6 +5,7 @@ import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { Store } from '../src/store.js';
 import { fixtureFile, publish, startApp } from './_helpers.mjs';
+import { publishApp, startApps, waitStatus } from './_apps.mjs';
 
 async function seeded(t) {
   const app = await startApp(t);
@@ -98,4 +99,63 @@ test('with no store configured the API answers 503 {error, code: STORE_UNCONFIGU
   assert.equal(res.status, 503);
   assert.equal(res.data.code, 'STORE_UNCONFIGURED');
   assert.equal((await app.get('/api/health')).status, 200);
+});
+
+test('api/apps/:id: status, start, stop and the log tail, with their statuses and shapes', async (t) => {
+  const app = await startApps(t);
+  const pub = await publishApp(t, app);
+  const id = pub.id;
+
+  const status = await app.get(`/api/apps/${id}`);
+  assert.equal(status.status, 200);
+  assert.deepEqual({ ...status.data, since: typeof status.data.since }, { id, status: 'stopped', version: null, error: null, since: 'string' });
+
+  const log = await app.get(`/api/apps/${id}/log`);
+  assert.equal(log.status, 200);
+  assert.match(log.headers.get('content-type'), /^text\/plain; charset=utf-8/);
+  assert.equal(log.headers.get('cache-control'), 'no-store');
+  assert.equal(log.text, '', 'no log yet is an empty body');
+
+  const started = await app.post(`/api/apps/${id}/start`, {});
+  assert.equal(started.status, 202);
+  assert.equal(started.data.id, id);
+  await waitStatus(app, id, 'running');
+  assert.match((await app.get(`/api/apps/${id}/log`)).text, /fixture listening/);
+  assert.match((await app.get(`/api/apps/${id}/log?bytes=10`)).text, /^.{1,10}$/s, 'bytes bounds the tail');
+
+  const stopped = await app.post(`/api/apps/${id}/stop`, {});
+  assert.equal(stopped.status, 200);
+  assert.equal(stopped.data.status, 'stopped');
+});
+
+test('api/apps/:id refuses an unknown id, a non-app, a missing JSON content type and a bad bytes', async (t) => {
+  const app = await startApps(t);
+  const pub = await publishApp(t, app);
+  const doc = await publish(app, { path: await fixtureFile(t, 'a.md', '# a'), title: 'A' });
+
+  for (const url of ['/api/apps/nope-abc123', '/api/apps/nope-abc123/log']) {
+    const res = await app.get(url);
+    assert.equal(res.status, 404, url);
+    assert.equal(res.data.code, 'ARTIFACT_UNKNOWN');
+  }
+  for (const [method, url] of [['GET', `/api/apps/${doc.id}`], ['POST', `/api/apps/${doc.id}/start`], ['POST', `/api/apps/${doc.id}/stop`], ['GET', `/api/apps/${doc.id}/log`]]) {
+    const res = await app.raw(method, url, method === 'POST' ? {} : undefined);
+    assert.equal(res.status, 409, url);
+    assert.equal(res.data.code, 'NOT_AN_APP');
+  }
+  assert.equal((await app.raw('POST', `/api/apps/${pub.id}/start`, undefined, {})).status, 415);
+  assert.equal((await app.raw('POST', `/api/apps/${pub.id}/stop`, undefined, {})).status, 415);
+  for (const bytes of ['0', '-1', 'abc', '1.5', '1048577', '']) {
+    const res = await app.get(`/api/apps/${pub.id}/log?bytes=${bytes}`);
+    assert.equal(res.status, 400, `bytes=${bytes}`);
+    assert.equal(res.data.code, 'INVALID_ARGUMENT');
+  }
+  assert.equal((await app.get(`/api/apps/${pub.id}/log?bytes=1048576`)).status, 200);
+});
+
+test('api/apps answers 503 STORE_UNCONFIGURED without a store', async (t) => {
+  const app = await startApp(t, { unconfigured: true });
+  const res = await app.get('/api/apps/some-app-abc123');
+  assert.equal(res.status, 503);
+  assert.equal(res.data.code, 'STORE_UNCONFIGURED');
 });

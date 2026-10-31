@@ -1,7 +1,7 @@
 // Pins the pure UI logic: grouping/ordering, route parsing, which Open link is used, and the displayed texts.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { formatBytes, groupByProject, openHref, parseRoute, relativeTime, sessionText } from '../frontend/src/lib/artifacts.ts';
+import { appActions, formatBytes, groupByProject, isTransient, openHref, parseRoute, relativeTime, sessionText, statusLabel } from '../frontend/src/lib/artifacts.ts';
 
 const art = (id, project, publishedAt) => ({
   id, project, title: id, kind: 'markdown', createdAt: publishedAt, link: `http://cc.internal/#plugin/code-artifact/a/${id}/`,
@@ -67,4 +67,18 @@ test('relativeTime counts in the largest whole unit', () => {
   assert.equal(ago(3600), '1 hour ago');
   assert.equal(ago(86400 * 3), '3 days ago');
   assert.equal(ago(86400 * 60), '2 months ago');
+});
+
+test('appActions enables Start from stopped or failed and Stop while installing, starting or running', () => {
+  assert.deepEqual(appActions('stopped'), { start: true, stop: false });
+  assert.deepEqual(appActions('failed'), { start: true, stop: false });
+  for (const s of ['installing', 'starting', 'running']) assert.deepEqual(appActions(s), { start: false, stop: true }, s);
+});
+
+test('isTransient is true only for the states that change by themselves', () => {
+  assert.deepEqual(['stopped', 'installing', 'starting', 'running', 'failed'].filter(isTransient), ['installing', 'starting']);
+});
+
+test('statusLabel names every state', () => {
+  for (const s of ['stopped', 'installing', 'starting', 'running', 'failed']) assert.ok(statusLabel(s).length > 0, s);
 });

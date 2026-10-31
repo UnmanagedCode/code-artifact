@@ -32,3 +32,16 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   }
   return (await res.json()) as T;
 }
+
+/** A text request to this plugin's own backend (the app log); `path` is relative like `api()`'s. */
+export async function apiText(path: string): Promise<string> {
+  if (path.startsWith('/')) throw new Error(`apiText('${path}'): root-relative, so it would reach cc, not this plugin`);
+  let res: Response;
+  try {
+    res = await fetch(path, { cache: 'no-store' });
+  } catch (e) {
+    throw new ApiError(0, `unreachable: ${e instanceof Error ? e.message : String(e)}`);
+  }
+  if (!res.ok) throw new ApiError(res.status, `HTTP ${res.status}`);
+  return res.text();
+}

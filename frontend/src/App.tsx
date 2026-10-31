@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Trash2Icon } from 'lucide-react';
 import { api } from '@/lib/api';
 import { isEmbedded } from '@/lib/theme';
-import { parseRoute, type ArtifactRec, type Route } from '@/lib/artifacts';
+import { parseRoute, type AppStatus, type ArtifactRec, type Route } from '@/lib/artifacts';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { ArtifactList } from '@/components/ArtifactList';
@@ -36,6 +36,11 @@ export function App() {
     const onPop = () => setRoute(parseRoute(location.search));
     window.addEventListener('popstate', onPop);
     return () => window.removeEventListener('popstate', onPop);
+  }, []);
+
+  // The detail view polls a running app; keep the list's badge in step with what it saw.
+  const onAppStatus = useCallback((id: string, app: AppStatus) => {
+    setArtifacts((prev) => prev?.map((a) => (a.id === id ? { ...a, app } : a)) ?? prev);
   }, []);
 
   const go = (search: string) => {
@@ -81,6 +86,7 @@ export function App() {
         artifact={current}
         embedded={embedded}
         onBack={toList}
+        onAppStatus={onAppStatus}
         onDeleteVersion={(n) => ask({
           title: `Delete v${n}?`,
           description: `Version ${n} of “${current.title}” is deleted for good. Its number is not reused.`,

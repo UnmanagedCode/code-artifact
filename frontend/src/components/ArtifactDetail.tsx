@@ -2,11 +2,13 @@ import { ArrowLeftIcon } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
-import { formatBytes, openHref, relativeTime, sessionText, type ArtifactRec } from '@/lib/artifacts';
+import { formatBytes, openHref, relativeTime, sessionText, type AppStatus, type ArtifactRec } from '@/lib/artifacts';
+import { AppPanel } from '@/components/AppPanel';
 
-export function ArtifactDetail({ artifact: a, embedded, onBack, onDeleteVersion, onDeleteArtifact }: {
+export function ArtifactDetail({ artifact: a, embedded, onBack, onAppStatus, onDeleteVersion, onDeleteArtifact }: {
   artifact: ArtifactRec;
   embedded: boolean;
+  onAppStatus: (id: string, status: AppStatus) => void;
   onBack: () => void;
   onDeleteVersion: (n: number) => void;
   onDeleteArtifact: () => void;
@@ -26,6 +28,7 @@ export function ArtifactDetail({ artifact: a, embedded, onBack, onDeleteVersion,
           <code className="font-mono break-all">{a.id}</code>
         </div>
       </header>
+      {a.kind === 'app' && <AppPanel artifact={a} embedded={embedded} onStatus={onAppStatus} />}
       <section aria-label="Versions" className="grid gap-2">
         {newestFirst.map((v) => (
           <Card key={v.n} className="grid gap-2 p-3">

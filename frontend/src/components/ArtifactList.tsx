@@ -1,6 +1,7 @@
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
+import { AppStatusBadge } from '@/components/AppPanel';
 import { groupByProject, latestOf, openHref, relativeTime, sessionText, type ArtifactRec } from '@/lib/artifacts';
 
 export function ArtifactList({ artifacts, embedded, onOpenDetail }: {
@@ -34,6 +35,7 @@ export function ArtifactList({ artifacts, embedded, onOpenDetail }: {
                   </a>
                   <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
                     <Badge variant="secondary">{a.kind}</Badge>
+                    {a.app && <AppStatusBadge status={a.app.status} />}
                     <span>v{v.n}</span>
                     <span>{relativeTime(v.publishedAt)}</span>
                     <span className="truncate">{sessionText(v)}</span>
