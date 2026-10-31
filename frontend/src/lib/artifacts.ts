@@ -85,13 +85,13 @@ export function formatBytes(n: number): string {
 /** The longest session label shown, in code points; below cc's 80-character prompt preview so a cut preview is shortened with an ellipsis. */
 export const MAX_SESSION_LABEL = 60;
 
-/** A stored session label as plain, single-line text: markdown syntax removed, shortened to `MAX_SESSION_LABEL` with `…` at a word boundary. */
+/** A stored session label as plain, single-line text: markdown syntax removed. A label over `MAX_SESSION_LABEL` code points is cut to at most that many, backing up to the last space only when it falls past halfway, then `…` is appended. */
 export function plainLabel(text: string): string {
   const stripped = text
     .split('\n')
     .map((line) => line.replace(/^\s*(?:#{1,6}\s+|>\s?|[-*+]\s+|\d+[.)]\s+)/, ''))
     .join('\n')
-    .replace(/!?\[([^\]]*)\](\([^)]*\)?)?/g, '$1')
+    .replace(/!?\[([^\]]*)\]\([^)]*\)?/g, '$1')
     .replace(/`+/g, '')
     .replace(/\*\*|__|~~/g, '')
     .replace(/(^|[\s(])[*_](?=\S)/g, '$1')
@@ -100,10 +100,10 @@ export function plainLabel(text: string): string {
     .trim();
   const chars = Array.from(stripped);
   if (chars.length <= MAX_SESSION_LABEL) return stripped;
-  let cut = chars.slice(0, MAX_SESSION_LABEL).join('');
+  let cut = chars.slice(0, MAX_SESSION_LABEL);
   const space = cut.lastIndexOf(' ');
   if (space > MAX_SESSION_LABEL / 2) cut = cut.slice(0, space);
-  return `${cut.trimEnd()}…`;
+  return `${cut.join('').trimEnd()}…`;
 }
 
 /** The publishing session as plain text: its cleaned label, else the short id, else "unknown session". */

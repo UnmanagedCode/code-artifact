@@ -91,13 +91,19 @@ test('plainLabel shortens past MAX_SESSION_LABEL at a word boundary with an elli
   assert.equal(Array.from(plainLabel('😀'.repeat(MAX_SESSION_LABEL + 5))).length, MAX_SESSION_LABEL + 1);
 });
 
+test('plainLabel backs up to the last space only when it falls past halfway, judged in code points', () => {
+  assert.equal(plainLabel('short ' + 'x'.repeat(80)), 'short ' + 'x'.repeat(MAX_SESSION_LABEL - 6) + '…');
+  const emoji = '😀'.repeat(20) + ' ' + 'y'.repeat(45);
+  assert.equal(plainLabel(emoji), '😀'.repeat(20) + ' ' + 'y'.repeat(MAX_SESSION_LABEL - 21) + '…');
+});
+
 test('sessionText falls back to the 8-character id when the label is only markup', () => {
   assert.equal(sessionText({ sessionId: 'abcdef123456', sessionLabel: '**' }), 'abcdef12');
   assert.equal(sessionText({ sessionId: 'abcdef123456', sessionLabel: '**Task:** `x`' }), 'Task: x');
 });
 
 test('plainLabel leaves an ordinary title byte-identical', () => {
-  for (const t of ['Fix the login bug', 'snake_case_name cleanup', 'C# port', '#42 regression', 'a*b refactor', 'v1.2 - release notes']) {
+  for (const t of ['Fix the login bug', 'snake_case_name cleanup', 'C# port', '#42 regression', 'a*b refactor', 'v1.2 - release notes', '[WIP] Fix the parser', 'array[0] handling']) {
     assert.equal(plainLabel(t), t);
   }
 });

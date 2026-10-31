@@ -20,7 +20,7 @@ export function ArtifactDetail({ artifact: a, embedded, onBack, onAppStatus, onD
       <div>
         <Button type="button" variant="ghost" size="sm" onClick={onBack}><ArrowLeftIcon /> Artifacts</Button>
       </div>
-      <header className="grid gap-1">
+      <header className="grid min-w-0 gap-1">
         <h1 className="text-xl font-semibold break-words">{a.title}</h1>
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
           <Badge variant="secondary">{a.kind}</Badge>
@@ -29,9 +29,9 @@ export function ArtifactDetail({ artifact: a, embedded, onBack, onAppStatus, onD
         </div>
       </header>
       {a.kind === 'app' && <AppPanel artifact={a} embedded={embedded} onStatus={onAppStatus} />}
-      <section aria-label="Versions" className="grid gap-2">
+      <section aria-label="Versions" className="grid min-w-0 gap-2">
         {newestFirst.map((v) => (
-          <Card key={v.n} className="grid gap-2 p-3">
+          <Card key={v.n} className="grid min-w-0 gap-2 p-3">
             <div className="flex flex-wrap items-center gap-2">
               <span className="font-medium">v{v.n}</span>
               {v.n === latestN && <Badge variant="default">latest</Badge>}
@@ -39,7 +39,7 @@ export function ArtifactDetail({ artifact: a, embedded, onBack, onAppStatus, onD
             </div>
             <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
               <span>{relativeTime(v.publishedAt)}</span>
-              <span>{sessionText(v)}</span>
+              <span className="min-w-0 [overflow-wrap:anywhere]">{sessionText(v)}</span>
               <span>{formatBytes(v.bytes)}</span>
             </div>
             <div className="flex flex-wrap gap-2">
