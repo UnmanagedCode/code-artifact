@@ -90,6 +90,12 @@ const server = http.createServer((req, res) => {
     fs.writeFileSync(data('escaped.pid'), String(child.pid));
     return json({ pid: child.pid });
   }
+  if (p === '/escape-spawner') {
+    // A descendant outside the process group that keeps spawning more escaped, marked descendants.
+    const code = "const cp = require('node:child_process'); setInterval(() => cp.spawn('sleep', ['300'], { stdio: 'ignore', detached: true }).unref(), 5);";
+    cp.spawn(process.execPath, ['-e', code], { stdio: 'ignore', detached: true }).unref();
+    return json({ ok: true });
+  }
   if (p === '/write-cwd') {
     fs.writeFileSync('written-by-app.txt', 'x');
     return json({ ok: true });

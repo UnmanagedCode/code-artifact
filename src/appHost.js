@@ -59,6 +59,14 @@ export function createAppHost({ store: storeOrGetter, storeDir = null, mount = M
     return run;
   }
 
+  /** Kills every process marked for `id` (every app when undefined); resolves how many were found, 0 without /proc or a store. */
+  async function sweep(id, grace) {
+    if (!HAS_PROC || !storeDir) return 0;
+    const { reaped, survivors } = await reapMarked(await storeReal(), id, grace);
+    if (survivors.length > 0) console.error(`code-artifact: ${survivors.length} marked process(es) survived the sweep: pid ${survivors.join(', ')}`);
+    return reaped;
+  }
+
   const logNote = (id, line) => note(getStore().logFile(id), line).catch(() => {});
 
   /** Clears a run's timers and closes its log fd; idempotent. */
@@ -79,7 +87,7 @@ export function createAppHost({ store: storeOrGetter, storeDir = null, mount = M
     release(s);
     s.cleanup = (async () => {
       if (s.pgid) await killGroup(s.pgid, t.graceMs);
-      if (HAS_PROC && storeDir) await reapMarked(await storeReal(), id, t.graceMs);
+      await sweep(id, t.graceMs);
     })().catch((e) => console.error(`code-artifact: cleanup of ${id} failed:`, e));
   }
 
@@ -201,14 +209,14 @@ export function createAppHost({ store: storeOrGetter, storeDir = null, mount = M
    * Stops an active run and waits for its processes to be gone; `grace` bounds the SIGTERM wait.
    * `sweep: false` leaves the marker sweep to the caller. The run always ends `stopped`, even if a step throws.
    */
-  async function halt(id, s, grace, { sweep = true } = {}) {
+  async function halt(id, s, grace, { sweep: doSweep = true } = {}) {
     s.stopping = true;
     try {
       // One kill per group: a launch that is stopping never spawns again, so a second pass would only double the wait.
       const group = s.pgid;
       if (group) await killGroup(group, grace);
       await s.launching;
-      if (sweep && HAS_PROC && storeDir) await reapMarked(await storeReal(), id, grace);
+      if (doSweep) await sweep(id, grace);
       await logNote(id, 'stopped');
     } finally {
       release(s);
@@ -290,7 +298,7 @@ export function createAppHost({ store: storeOrGetter, storeDir = null, mount = M
         console.warn('code-artifact: no /proc here, so orphaned app processes are not reaped');
         return;
       }
-      const n = await reapMarked(await storeReal(), undefined, t.graceMs);
+      const n = await sweep(undefined, t.graceMs);
       if (n > 0) console.warn(`code-artifact: reaped ${n} orphaned app process(es)`);
     },
 
@@ -304,7 +312,7 @@ export function createAppHost({ store: storeOrGetter, storeDir = null, mount = M
       const active = [...states].filter(([, s]) => isActive(s));
       await Promise.all(active.map(([id, s]) => halt(id, s, t.shutdownGraceMs, { sweep: false })
         .catch((e) => console.error(`code-artifact: stopping ${id} failed:`, e))));
-      if (storeDir && HAS_PROC) await reapMarked(await storeReal(), undefined, 0);
+      await sweep(undefined, 0);
     },
   };
 }

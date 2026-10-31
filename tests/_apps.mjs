@@ -3,7 +3,7 @@ import fsp from 'node:fs/promises';
 import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { markedPids, pidAlive } from '../src/appProcs.js';
+import { markedPids, pidAlive, reapMarked } from '../src/appProcs.js';
 import { tmp, startApp, publish } from './_helpers.mjs';
 
 const FIXTURE = fileURLToPath(new URL('./fixtures/app-server.cjs', import.meta.url));
@@ -79,6 +79,9 @@ export const pidGone = (pid) => waitFor(async () => !(await pidAlive(pid)), { wh
 export async function markerPids(storeDir) {
   return (await markedPids(await fsp.realpath(storeDir))).map((m) => m.pid);
 }
+
+/** SIGKILLs every process marked with this store's run marker; `real` is the store's realpath, taken while the dir exists. */
+export const reapStore = (real) => reapMarked(real, undefined, 0);
 
 /** The pid the fixture recorded in `$DATA_DIR/<name>`. */
 export async function recordedPid(storeDir, id, name = 'pid') {
