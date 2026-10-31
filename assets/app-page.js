@@ -18,6 +18,7 @@
   };
   // A refused Start/Stop shows in the bar, whatever the state: while running there is no panel to carry it.
   function setFailure(message) {
+    if (!actionError) return;
     actionError.textContent = message || '';
     actionError.hidden = !message;
   }

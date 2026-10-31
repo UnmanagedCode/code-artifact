@@ -1,6 +1,10 @@
 // Pins the app proxy: the pure rewrite rules (path modes, forwarded headers, Location, Set-Cookie) and the end-to-end
 // behaviour in both prefix modes — HTTP, bodies, headers, redirects, cookies, and WebSocket upgrades.
 import test from 'node:test';
+import net from 'node:net';
+import { once } from 'node:events';
+import { PassThrough } from 'node:stream';
+import { appUpgrade } from '../src/appProxy.js';
 import assert from 'node:assert/strict';
 import { forwardHeaders, rewriteLocation, rewriteSetCookie, selfOrigins, upstreamPath } from '../src/appRewrite.js';
 import { echoOnce, publishApp, rawUpgrade, runApp, socketClosed, startApps, waitFor } from './_apps.mjs';
@@ -58,6 +62,20 @@ test('selfOrigins names the app and the client\'s host under both schemes', () =
     'http://127.0.0.1:5000', 'http://localhost:5000', 'http://[::1]:5000', 'http://share.example', 'https://share.example',
   ]);
   assert.equal(selfOrigins(5000, undefined).length, 3);
+});
+
+test('selfOrigins never yields an unparseable origin, whatever the client sent as its host', () => {
+  for (const junk of ['a b', '', 'a/b?c', '[::', '%zz', 'x\u0000y', 'http://', '@', ':', 'a b:99999', '\u00ad']) {
+    for (const origin of selfOrigins(5000, junk)) assert.doesNotThrow(() => new URL(origin), JSON.stringify(junk));
+  }
+  assert.equal(selfOrigins(5000, 'a b').length, 3, 'a host that does not parse adds nothing');
+});
+
+test('a forwarded host is compared by its normalised origin: an explicit default port matches', () => {
+  const origins = selfOrigins(5000, 'share.example:443');
+  assert.ok(origins.includes('https://share.example'));
+  assert.equal(rewriteLocation('https://share.example/x', { basePath: BASE, mount: MOUNT, id: 'a1', upstreamOrigins: origins }), '/app/a1/x');
+  assert.equal(rewriteLocation('//share.example:443/x', { basePath: BASE, mount: MOUNT, id: 'a1', upstreamOrigins: origins }), '/app/a1/x');
 });
 
 const cookie = (value) => rewriteSetCookie(value, { basePath: BASE });
@@ -148,6 +166,17 @@ test('a stopped app is 503, an unknown or non-app id is 404, both with the plugi
   assert.equal((await fetch(`${app.base}/app/${site.id}/`)).status, 404);
 });
 
+test('a malformed forwarded host with a protocol-relative redirect does not take the backend down', async (t) => {
+  const app = await startApps(t);
+  const pub = await publishApp(t, app);
+  await runApp(app, pub.id);
+  const res = await fetch(`${app.base}/app/${pub.id}/redirect?to=${encodeURIComponent('//x.example/y')}`, { redirect: 'manual', headers: { 'x-forwarded-host': 'a b' } });
+  assert.equal(res.status, 302);
+  assert.equal(res.headers.get('location'), '//x.example/y', 'an external redirect passes unchanged');
+  assert.equal((await fetch(`${app.base}/api/health`)).status, 200, 'the backend is still up');
+  assert.equal((await fetch(`${app.base}/app/${pub.id}/echo`)).status, 200);
+});
+
 test('app/<id> without a trailing slash redirects to <id>/ and keeps the query', async (t) => {
   const app = await startApps(t);
   const pub = await publishApp(t, app);
@@ -232,4 +261,57 @@ test('an app that closes its end of an upgraded socket closes the client\'s', as
   await echoOnce(up.socket, 'a');
   await app.post(`/api/apps/${pub.id}/stop`, {});
   await socketClosed(up.socket);
+});
+
+test('a refused upgrade\'s socket is destroyed by the server although the client keeps its own end open', async (t) => {
+  const app = await startApps(t);
+  app.server.closeAllConnections();
+  const connections = () => new Promise((resolve) => app.server.getConnections((_err, n) => resolve(n)));
+  const url = new URL(app.base);
+  const client = net.connect({ port: Number(url.port), host: url.hostname, allowHalfOpen: true });
+  t.after(() => client.destroy());
+  let received = '';
+  client.on('data', (d) => { received += d; });
+  const ended = once(client, 'end');
+  await once(client, 'connect');
+  client.write('GET /ws HTTP/1.1\r\nHost: x\r\nConnection: Upgrade\r\nUpgrade: fixture\r\n\r\n');
+  await ended;
+  assert.match(received, /^HTTP\/1\.1 404 /);
+  // A half-closed server socket would stay counted until the client closed too.
+  await waitFor(async () => (await connections()) === 0, { what: 'the server to release its end of the refused socket' });
+});
+
+test('a client that leaves while the upstream connect is pending takes the upstream socket with it and nothing is written', async () => {
+  const written = { up: [], client: [] };
+  const up = new PassThrough();
+  up.connecting = true;
+  up.write = (...args) => { written.up.push(args); return true; };
+  const client = new PassThrough();
+  client.write = (...args) => { written.client.push(args); return true; };
+  const apps = { target: () => ({ host: '127.0.0.1', port: 1, basePath: '/m/app/a1', prefix: 'strip', mount: '/m' }), kindOf: async () => 'app' };
+  const req = { url: '/app/a1/ws', method: 'GET', httpVersion: '1.1', rawHeaders: ['Host', 'x'], socket: { remoteAddress: '1.2.3.4' } };
+  await appUpgrade(apps, { connect: () => up })(req, client, Buffer.alloc(0));
+
+  client.destroy();
+  await once(client, 'close');
+  assert.equal(up.destroyed, true, 'the pending upstream socket is destroyed as soon as the client is gone');
+  up.emit('connect'); // the connect that was already in flight completes late
+  assert.deepEqual(written.up, [], 'the request is not sent to the app');
+  assert.deepEqual(written.client, [], 'nothing is written to the dead client');
+});
+
+test('an app that ends an upgraded socket itself, process still running, closes the client\'s socket and frees its end', async (t) => {
+  const app = await startApps(t);
+  const pub = await publishApp(t, app);
+  await runApp(app, pub.id);
+  const open = async () => (await (await fetch(`${app.base}/app/${pub.id}/ws-open`)).json()).open;
+  const up = await rawUpgrade(app.base, `/app/${pub.id}/ws`);
+  t.after(() => up.socket.destroy());
+  assert.equal(await echoOnce(up.socket, 'a'), 'a');
+  assert.equal(await open(), 1);
+  const closed = await (await fetch(`${app.base}/app/${pub.id}/ws-close`)).json();
+  assert.equal(closed.closed, 1);
+  await socketClosed(up.socket);
+  await waitFor(async () => (await open()) === 0, { what: 'the app to drop its connection' });
+  assert.equal((await app.get(`/api/apps/${pub.id}`)).data.status, 'running', 'the app itself never stopped');
 });

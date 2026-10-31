@@ -142,9 +142,9 @@ export function createOps({ store: storeOrGetter, cc, apps, limits = LIMITS }) {
       str(args, 'sessionId', { max: 200 });
       const current = await store.get(id);
       if (!current) throw new Refusal('ARTIFACT_UNKNOWN', `no artifact ${id}`);
+      // The commit and the restart of an active app run under the app's lock, so a version delete cannot slip between them.
       const record = await ingest(store, { ...args, path }, caller, current.kind, ({ version, staging }) =>
-        store.addVersion(id, { title, version }, staging));
-      if (record.kind === 'app') await apps.restartIfActive(id);
+        apps.committing(id, () => store.addVersion(id, { title, version }, staging)));
       return published(record);
     },
 
@@ -173,7 +173,7 @@ export function createOps({ store: storeOrGetter, cc, apps, limits = LIMITS }) {
         return { deleted: 'artifact', id };
       }
       // The app stops only when it runs the version going away and the delete will go ahead (a refused delete must not
-      // stop it); both are decided under the app's lock, so a concurrent update cannot slip between check and unlink.
+      // stop it); both are decided under the app's lock, which an update's commit also takes, so no update can slip between the check and the unlink.
       const willDelete = async () => {
         const current = await store.get(id);
         return current !== null && current.versions.length > 1 && current.versions.some((v) => v.n === version);

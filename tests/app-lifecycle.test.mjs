@@ -177,10 +177,13 @@ test('a running log over the cap is rotated: app.log.1 holds the newest bytes an
   await fetch(`${app.base}/app/${pub.id}/spam?lines=2500`);
   const log = path.join(dirOf(app, pub.id), 'app.log');
   const rotated = `${log}.1`;
-  // Rotation is done once .1 holds the cap's worth of bytes and app.log has been truncated after it.
-  await waitFor(async () => (await fsp.stat(rotated).then((s) => s.size, () => 0)) === 4096 && (await fsp.stat(log)).size <= 4096, { what: 'log rotation' });
-  const kept = await fsp.readFile(rotated, 'utf8');
-  assert.match(kept, /line-02500\nEND\n$/, 'the tail is kept');
+  // Settled: .1 holds the final tail (a round that raced the app's write is skipped, never kept partial) and app.log is truncated.
+  const settled = async () => {
+    const kept = await fsp.readFile(rotated, 'utf8').catch(() => '');
+    return kept.endsWith('line-02500\nEND\n') && (await fsp.stat(log)).size <= 4096 ? kept : null;
+  };
+  const kept = await waitFor(settled, { what: 'log rotation to settle' });
+  assert.equal(Buffer.byteLength(kept), 4096, 'the cap\'s worth of the tail is kept');
   assert.doesNotMatch(kept, /line-00001\n/, 'the head is dropped');
 });
 

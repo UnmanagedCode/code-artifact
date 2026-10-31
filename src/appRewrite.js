@@ -32,7 +32,14 @@ export function forwardHeaders(rawHeaders, { upstreamHost, basePath, remoteAddre
  */
 export function selfOrigins(port, forwardedHost) {
   const own = [`http://127.0.0.1:${port}`, `http://localhost:${port}`, `http://[::1]:${port}`];
-  return forwardedHost ? [...own, `http://${forwardedHost}`, `https://${forwardedHost}`] : own;
+  if (!forwardedHost) return own;
+  // The host comes from a client header: only what parses becomes an origin, compared by its normalised form
+  // (so `share.example:443` and `https://share.example` agree).
+  const named = [];
+  for (const scheme of ['http', 'https']) {
+    try { named.push(new URL(`${scheme}://${forwardedHost}`).origin); } catch { /* junk host: not an origin */ }
+  }
+  return [...own, ...named];
 }
 
 const ABSOLUTE = /^[a-z][a-z0-9+.-]*:/i;

@@ -19,7 +19,10 @@ export async function openRunLog(file) {
 /** Appends one `[code-artifact] …` line, written by the host itself. */
 export const note = (file, line) => fsp.appendFile(file, `[code-artifact] ${line}\n`);
 
-/** When `file` exceeds `cap` bytes, keeps its last `cap` bytes in `file.1` and truncates it. */
+/**
+ * When `file` exceeds `cap` bytes, keeps its last `cap` bytes in `file.1` and truncates it. A round is skipped when the app
+ * wrote between the stat and the read (the tail could be partial); the next tick looks again.
+ */
 export async function rotateIfOver(file, cap) {
   let size;
   try { size = (await fsp.stat(file)).size; } catch { return; }
@@ -28,6 +31,7 @@ export async function rotateIfOver(file, cap) {
   try {
     const buf = Buffer.alloc(cap);
     const { bytesRead } = await handle.read(buf, 0, cap, size - cap);
+    if ((await handle.stat()).size !== size) return;
     await fsp.writeFile(`${file}.1`, buf.subarray(0, bytesRead));
   } finally {
     await handle.close();

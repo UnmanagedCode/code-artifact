@@ -63,12 +63,12 @@ async function waitUntil(done, ms) {
   }
 }
 
-/** SIGTERMs group `pgid`, then SIGKILLs it after `graceMs`; resolves once it is gone (or one more second has passed). */
+/** SIGTERMs group `pgid`, then SIGKILLs it after `graceMs`; resolves true once it is gone, false if it survived one more second. */
 export async function killGroup(pgid, graceMs) {
   signal(-pgid, 'SIGTERM');
-  if (await waitUntil(async () => !(await groupAlive(pgid)), graceMs)) return;
+  if (await waitUntil(async () => !(await groupAlive(pgid)), graceMs)) return true;
   signal(-pgid, 'SIGKILL');
-  await waitUntil(async () => !(await groupAlive(pgid)), 1000);
+  return waitUntil(async () => !(await groupAlive(pgid)), 1000);
 }
 
 /** `[{pid, id, pgrp}]` of every process whose marker names this store (and `id`, when given), found via /proc/<pid>/environ. */

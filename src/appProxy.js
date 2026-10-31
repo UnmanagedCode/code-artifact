@@ -44,7 +44,8 @@ export function appProxyRouter(apps) {
     const upstreamOrigins = selfOrigins(target.port, req.headers['x-forwarded-host'] ?? req.headers.host);
     const locate = { basePath: target.basePath, mount: target.mount, id, upstreamOrigins };
 
-    const up = http.request({ host: target.host, port: target.port, method: req.method, path, headers }, (ures) => {
+    // Everything that can throw while rewriting runs here, inside a try below: an escaped throw would kill the backend.
+    const relay = (ures) => {
       // The app's own policy applies to the app: ours is for the plugin's pages.
       res.removeHeader('Content-Security-Policy');
       res.removeHeader('X-Content-Type-Options');
@@ -64,6 +65,16 @@ export function appProxyRouter(apps) {
       }
       for (const { name, values } of seen.values()) res.setHeader(name, values.length === 1 ? values[0] : values);
       ures.pipe(res);
+    };
+    const up = http.request({ host: target.host, port: target.port, method: req.method, path, headers }, (ures) => {
+      try {
+        relay(ures);
+      } catch (e) {
+        console.error('code-artifact: rewriting an app response failed:', e);
+        ures.destroy();
+        if (res.headersSent) res.destroy(e);
+        else plain(res, 502);
+      }
     });
     up.on('error', (e) => {
       if (res.headersSent) return res.destroy(e);
@@ -79,8 +90,8 @@ const refuseUpgrade = (socket, status) => {
   socket.end(`HTTP/1.1 ${status} ${http.STATUS_CODES[status]}\r\nConnection: close\r\n\r\n`, () => socket.destroy());
 };
 
-/** The `upgrade` listener: pipes a WebSocket upgrade for `/app/<id>/…` raw to the running app; anything else is refused and closed. */
-export function appUpgrade(apps) {
+/** The `upgrade` listener (`connect` is a test seam for the upstream socket): pipes a WebSocket upgrade for `/app/<id>/…` raw to the running app; anything else is refused and closed. */
+export function appUpgrade(apps, { connect = net.connect } = {}) {
   return async (req, socket, head) => {
     socket.on('error', () => socket.destroy());
     const parsed = parseAppUrl(req.url);
@@ -96,7 +107,7 @@ export function appUpgrade(apps) {
     let up = null;
     const closeBoth = () => { up?.destroy(); socket.destroy(); };
     socket.once('close', closeBoth); // before connecting: a client that leaves mid-connect must not leak the upstream socket
-    up = net.connect(target.port, target.host);
+    up = connect(target.port, target.host);
     up.once('connect', () => {
       if (socket.destroyed) return up.destroy();
       let lines = `${req.method} ${path} HTTP/${req.httpVersion}\r\n`;

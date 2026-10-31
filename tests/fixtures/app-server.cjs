@@ -55,6 +55,12 @@ const server = http.createServer((req, res) => {
     process.stdout.write(`${out}END\n`);
     return json({ ok: true });
   }
+  if (p === '/ws-close') {
+    // Ends every upgraded connection from the app's side, leaving the process running.
+    const n = upgraded.size;
+    for (const s of upgraded) s.end();
+    return json({ closed: n });
+  }
   if (p === '/ws-open') return json({ open: upgraded.size });
   if (p === '/escape') {
     // A descendant that leaves the process group, so only the run marker in its environment can find it.

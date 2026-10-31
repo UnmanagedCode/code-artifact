@@ -7,8 +7,12 @@ import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { freePort, pidAlive } from '../src/appProcs.js';
+import { Store } from '../src/store.js';
+import { createCc } from '../src/cc.js';
+import { createOps } from '../src/ops.js';
+import { createAppHost } from '../src/appHost.js';
 import { tmp } from './_helpers.mjs';
-import { appSource, markerPids, pidGone, publishApp, recordedPid, runApp, startApps, waitFor } from './_apps.mjs';
+import { TIMINGS, appSource, markerPids, pidGone, publishApp, recordedPid, runApp, startApps, waitFor } from './_apps.mjs';
 
 test('a boot on the same store reaps what a crashed backend left behind', async (t) => {
   const a = await startApps(t);
@@ -78,16 +82,50 @@ test('SIGTERM to the backend stops its apps and exits 0', async (t) => {
   await fsp.access(storeDir);
 });
 
-for (const delay of [0, 2, 6, 12]) {
-  test(`start() racing shutdown() (shutdown after ${delay} ms) leaves no marked process after shutdown resolves`, async (t) => {
-    const a = await startApps(t);
-    const pub = await publishApp(t, a, { manifest: { start: 'node server.js', install: 'sleep 300' } });
-    const started = a.server.apps.start(pub.id).then(() => 'started', () => 'refused');
-    await new Promise((r) => setTimeout(r, delay));
-    await a.server.apps.shutdown();
-    assert.deepEqual(await markerPids(a.storeDir), [], 'nothing runs once shutdown() has resolved');
-    await started;
-    assert.deepEqual(await markerPids(a.storeDir), [], 'and nothing is spawned after it either');
-    assert.equal(await a.server.apps.start(pub.id).catch(() => 'refused'), 'refused', 'a closed host refuses new starts');
+test('a Start in flight when shutdown() runs is refused and spawns nothing, even after every launch has settled', async (t) => {
+  const storeDir = path.join(await tmp(t), 'store');
+  const store = await Store.open(storeDir);
+  let gate = null;
+  let reached;
+  const arrived = new Promise((r) => { reached = r; });
+  // Holds the Start's first store read, so shutdown() runs while the Start is between its checks and its run being recorded.
+  const gated = new Proxy(store, {
+    get(target, prop) {
+      if (prop === 'get') {
+        return async (id) => {
+          const record = await target.get(id);
+          if (gate) { const held = gate; gate = null; reached(); await held.promise; }
+          return record;
+        };
+      }
+      const value = target[prop];
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
   });
-}
+  const apps = createAppHost({ store: gated, storeDir, timings: TIMINGS });
+  t.after(() => apps.shutdown());
+  const ops = createOps({ store, cc: createCc(null), apps });
+  const pub = await ops.publish({ path: await appSource(t), title: 'x' }, { sessionId: 's', project: 'p' });
+
+  let release;
+  gate = { promise: new Promise((r) => { release = r; }) };
+  const started = apps.start(pub.id).then(() => 'started', () => 'refused');
+  await arrived;
+  await apps.shutdown();
+  release();
+  assert.equal(await started, 'refused', 'a closed host refuses the Start that was already past its first check');
+  await apps.settled();
+  assert.deepEqual(await markerPids(storeDir), [], 'nothing was spawned after shutdown() resolved');
+  assert.equal(await apps.start(pub.id).catch(() => 'refused'), 'refused');
+});
+
+test('shutdown() also kills a descendant that left the process group', async (t) => {
+  const a = await startApps(t);
+  const pub = await publishApp(t, a);
+  await runApp(a, pub.id);
+  await fetch(`${a.base}/app/${pub.id}/escape`);
+  const escaped = await recordedPid(a.storeDir, pub.id, 'escaped.pid');
+  assert.ok(await pidAlive(escaped));
+  await a.server.apps.shutdown();
+  assert.equal(await pidAlive(escaped), false, 'gone by the time shutdown() resolves');
+});

@@ -9,7 +9,7 @@ import { createCc } from '../src/cc.js';
 import { createOps } from '../src/ops.js';
 import { createAppHost } from '../src/appHost.js';
 import { tmp } from './_helpers.mjs';
-import { appSource, markerPids, pidGone, publishApp, recordedPid, runApp, startApps, waitStatus } from './_apps.mjs';
+import { TIMINGS, appSource, markerPids, pidGone, publishApp, recordedPid, runApp, startApps, waitFor, waitStatus } from './_apps.mjs';
 
 const update = async (t, app, id, opts) => {
   const res = await app.mcp('update_artifact', { artifact: id, path: await appSource(t, opts) });
@@ -122,4 +122,53 @@ test('prune skips a version the host reports as active, and spares nothing other
   };
   assert.deepEqual((await run(() => null)).versions.map((v) => v.version), [1]);
   assert.deepEqual((await run((id) => 1)).versions, []);
+});
+
+test('an update cannot slip between a version delete\'s check and its unlink', async (t) => {
+  const storeDir = path.join(await tmp(t), 'store');
+  const store = await Store.open(storeDir);
+  const host = createAppHost({ store, storeDir, timings: TIMINGS });
+  t.after(() => host.shutdown());
+
+  // The delete's first read of the record is held after it has read a one-version record.
+  let gate = null;
+  let reached;
+  const arrived = new Promise((r) => { reached = r; });
+  const gated = new Proxy(store, {
+    get(target, prop) {
+      if (prop === 'get') {
+        return async (id) => {
+          const record = await target.get(id);
+          if (gate) { const held = gate; gate = null; reached(); await held.promise; }
+          return record;
+        };
+      }
+      const value = target[prop];
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  });
+  // Tells us when the update has reached its commit, which in a correct build then waits for the app's lock.
+  let atCommit;
+  const committing = new Promise((r) => { atCommit = r; });
+  const apps = { ...host, committing: (id, fn) => { atCommit(); return host.committing(id, fn); } };
+  const ops = createOps({ store: gated, cc: createCc(null), apps });
+  const caller = { sessionId: 's', project: 'p' };
+  const pub = await ops.publish({ path: await appSource(t, { version: '1' }), title: 'x' }, caller);
+  await host.start(pub.id);
+  await waitFor(() => host.status(pub.id).status === 'running', { what: 'the app to run' });
+
+  let release;
+  gate = { promise: new Promise((r) => { release = r; }) };
+  const removing = ops.remove({ artifact: pub.id, version: 1 }).then(() => null, (e) => e);
+  await arrived;
+  const updating = ops.update({ artifact: pub.id, path: await appSource(t, { version: '2' }) }, caller);
+  await committing;
+  release();
+  const [refused] = await Promise.all([removing, updating]);
+
+  assert.equal(refused?.code, 'LAST_VERSION', 'the delete saw the record as it was, and was refused, not applied to a newer one');
+  assert.deepEqual((await store.get(pub.id)).versions.map((v) => v.n), [1, 2]);
+  await host.settled();
+  assert.deepEqual({ status: host.status(pub.id).status, version: host.status(pub.id).version }, { status: 'running', version: 2 });
+  await fsp.access(path.join(storeDir, 'artifacts', pub.id, 'v', '1', 'content'));
 });

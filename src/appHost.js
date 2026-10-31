@@ -5,7 +5,9 @@ import { Refusal } from './refusal.js';
 import { CONTENT } from './ingest.js';
 import { MOUNT, appBasePath } from './links.js';
 import { note, openRunLog, rotateIfOver } from './appLog.js';
-import { HAS_PROC, RUN_MARKER, freePort, killGroup, probe, reapMarked, spawnGroup } from './appProcs.js';
+import * as realProcs from './appProcs.js';
+
+const { HAS_PROC, RUN_MARKER } = realProcs;
 
 /** Timings in ms (and the log cap in bytes); tests inject shorter ones. */
 export const APP_TIMINGS = Object.freeze({
@@ -28,10 +30,11 @@ const exitText = (code, sig) => (sig ? `killed by ${sig}` : `exited with code ${
  * Owns the processes of every app artifact: one per artifact, always the latest version, state in memory only.
  * `store` is a Store or a function returning one; `storeDir` (may be null) scopes the orphan sweep.
  *
- * Lock order: ops takes a per-id lock here first, or the store's mutex first and then calls `restartIfActive`;
+ * Lock order: ops takes a per-id lock here first (`exclusive`, `committing`), and the store's mutex only inside it;
  * nothing here calls into the store while holding the store's mutex, so there is no cycle.
  */
-export function createAppHost({ store: storeOrGetter, storeDir = null, mount = MOUNT, timings = {} }) {
+export function createAppHost({ store: storeOrGetter, storeDir = null, mount = MOUNT, timings = {}, procs = realProcs }) {
+  const { freePort, killGroup, probe, reapMarked, spawnGroup } = procs; // `procs` is a test seam: fake processes
   const t = { ...APP_TIMINGS, ...timings };
   const getStore = () => (typeof storeOrGetter === 'function' ? storeOrGetter() : storeOrGetter);
   const states = new Map(); // id → run state; replaced (never mutated back to active) on each Start
@@ -200,9 +203,10 @@ export function createAppHost({ store: storeOrGetter, storeDir = null, mount = M
   async function halt(id, s, grace, { sweep = true } = {}) {
     s.stopping = true;
     try {
-      if (s.pgid) await killGroup(s.pgid, grace);
+      // One kill per group: a launch that is stopping never spawns again, so a second pass would only double the wait.
+      const group = s.pgid;
+      if (group) await killGroup(group, grace);
       await s.launching;
-      if (s.pgid) await killGroup(s.pgid, grace);
       if (sweep && HAS_PROC && storeDir) await reapMarked(await storeReal(), id, grace);
       await logNote(id, 'stopped');
     } finally {
@@ -231,12 +235,19 @@ export function createAppHost({ store: storeOrGetter, storeDir = null, mount = M
     start: (id) => locked(id, () => startLocked(id)),
     stop: (id) => locked(id, () => stopLocked(id)),
 
-    /** After an update: an active app restarts on the new latest version; a stopped one stays stopped. */
-    restartIfActive: (id) => locked(id, async () => {
+    /**
+     * Runs `commit` (the store write that adds a version) under the id's lock, then restarts an active app on the
+     * new latest version; a stopped one stays stopped. Serialising with `exclusive` means a version delete cannot
+     * interleave with the commit and unlink what the app runs.
+     */
+    committing: (id, commit) => locked(id, async () => {
+      const result = await commit();
       const s = states.get(id);
-      if (!s || !isActive(s)) return publicStatus(s);
-      await stopLocked(id);
-      return startLocked(id);
+      if (s && isActive(s)) {
+        await stopLocked(id);
+        await startLocked(id);
+      }
+      return result;
     }),
 
     /**
@@ -263,6 +274,12 @@ export function createAppHost({ store: storeOrGetter, storeDir = null, mount = M
       const s = states.get(id);
       if (!s || s.status !== 'running' || s.stopping) return null;
       return { host: s.host, port: s.port, basePath: s.basePath, prefix: s.prefix, mount };
+    },
+
+    /** Resolves once no Start/Stop is queued and every launch has run to `running`, `failed` or a stop: a test sync point. */
+    async settled() {
+      await Promise.all([...locks.values()]);
+      await Promise.all([...states.values()].map((s) => s.launching));
     },
 
     /** Boot: kills what a crashed or SIGKILLed backend left behind. Apps do not come back. */
