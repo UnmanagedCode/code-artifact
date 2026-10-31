@@ -37,5 +37,6 @@ body {
 .md th, .md td { padding: 0.375rem 0.75rem; border: 1px solid var(--border); }
 .md th { background: var(--muted); text-align: left; }
 .md hr { border: 0; border-top: 1px solid var(--border); margin: 1.5em 0; }
+.md li:has(> input[type='checkbox']) { list-style: none; margin-left: -1.25em; }
 .md li > input[type='checkbox'] { margin-right: 0.4em; }
 .md details { margin: 0 0 1em; }

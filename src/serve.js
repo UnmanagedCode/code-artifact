@@ -14,6 +14,7 @@ const PAGE_ASSETS = {
   'page.css': [path.join(ROOT, 'assets'), 'page.css'],
   'fallback.css': [path.join(ROOT, 'frontend', 'src'), 'cc-theme-fallback.css'],
   'theme-init.js': [path.join(ROOT, 'frontend', 'public'), 'theme-init.js'],
+  'nav.js': [path.join(ROOT, 'frontend', 'public'), 'nav.js'],
 };
 const PINNED_CACHE = 'private, max-age=31536000, immutable';
 

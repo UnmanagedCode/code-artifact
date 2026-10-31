@@ -20,6 +20,7 @@ function shell({ prefix, title, header, body }) {
 <link rel="stylesheet" href="${prefix}_page/fallback.css">
 <link rel="stylesheet" href="${prefix}_page/page.css">
 <script src="${prefix}_page/theme-init.js"></script>
+<script src="${prefix}_page/nav.js"></script>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${escapeHtml(title)}</title>
 </head>

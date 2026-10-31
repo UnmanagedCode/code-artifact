@@ -77,7 +77,7 @@ Every non-GET/HEAD/OPTIONS request needs `Content-Type: application/json` (else 
 | `GET a/:id/…` | The latest version; `Cache-Control: no-cache` |
 | `GET a/:id/v/:n/…` | A pinned version (`:n` is `[1-9][0-9]*`); `Cache-Control: private, max-age=31536000, immutable` |
 | `GET dl/:id/:n` | `Content-Disposition: attachment`: the stored file, or a `<id>-v<n>.tar.gz` of a static site |
-| `GET _page/page.css`, `_page/fallback.css`, `_page/theme-init.js` | Assets of the server-rendered pages |
+| `GET _page/page.css`, `_page/fallback.css`, `_page/theme-init.js`, `_page/nav.js` | Assets of the server-rendered pages |
 
 Per kind at the version root: `markdown` and `download` answer a page (any deeper subpath is 404); `static` serves files as-is, `index.html` for a directory URL, a relative `301` for a directory without a trailing slash, never a listing, never a dotfile. A path segment that is empty, `.`/`..`, dot-led, or holds `/`, `\` or NUL after decoding is 404, as is anything whose real path leaves the version's `content/`.
 

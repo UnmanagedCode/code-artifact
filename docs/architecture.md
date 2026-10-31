@@ -62,6 +62,7 @@ Node ESM backend (Express 4) plus a React/Vite/Tailwind v4 UI, one package. Cont
 - `res.sendFile` gets a relative path with `root`: an absolute path makes `dotfiles:'deny'` refuse everything under the store's dot-directory.
 - Static responses drop the CSP header (`res.removeHeader`); everything else keeps it.
 - The page assets under `_page/` are served from their one source file each, so the pages render while the UI is unbuilt.
+- cc steers a page it already shows with `navigate` (a `replaceState` plus a synthetic `popstate`, never a load). `frontend/public/nav.js`, loaded by the UI document and by every server-rendered page, reloads when the path changes under the document; a query-only or hash-only change does not reload. Without it, opening an artifact from the UI, or a second artifact link while the plugin is docked, would leave stale content.
 - Markdown is rendered once at publish and read from `rendered.html`, so serving never parses.
 
 ## Tests

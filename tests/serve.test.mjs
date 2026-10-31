@@ -125,6 +125,7 @@ test('markdown: the page has the bridge first, the theme, relative assets, sanit
   assert.match(head, /<script src="\/pluginBridge\.js"><\/script>/);
   assert.match(head, /href="\.\.\/\.\.\/_page\/page\.css"/);
   assert.match(head, /src="\.\.\/\.\.\/_page\/theme-init\.js"/);
+  assert.match(head, /src="\.\.\/\.\.\/_page\/nav\.js"/);
   assert.match(page.text, /<h1>Title<\/h1>/);
   assert.match(page.text, /<table>/);
   assert.ok(!page.text.includes('alert(1)'));
@@ -146,7 +147,7 @@ test('the pinned markdown page uses the deeper relative prefix and says pinned',
 
 test('page assets are served and everything else under _page is 404', async (t) => {
   const app = await startApp(t);
-  for (const f of ['page.css', 'fallback.css', 'theme-init.js']) assert.equal((await app.get(`/_page/${f}`)).status, 200, f);
+  for (const f of ['page.css', 'fallback.css', 'theme-init.js', 'nav.js']) assert.equal((await app.get(`/_page/${f}`)).status, 200, f);
   assert.match((await app.get('/_page/fallback.css')).text, /--background/);
   for (const f of ['other.css', '..%2fpackage.json', 'constructor']) assert.equal((await app.get(`/_page/${f}`)).status, 404, f);
 });
