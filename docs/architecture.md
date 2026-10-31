@@ -48,7 +48,7 @@ Node ESM backend (Express 4) plus a React/Vite/Tailwind v4 UI, one package. Cont
 <store>/.trash/<rand>/                       artifact dirs on their way out
 ```
 
-`artifact.json`: `schema`, `id`, `kind`, `project`, `title` (current), `createdAt`, `nextVersion`, `versions[]`. A record is validated on every read (`recordProblem` in `src/store.js`); a malformed or unparseable one is logged, left on disk, and excluded from `get`, `list` and `prune`. A version: `n`, `title`, `publishedAt`, `sessionId`, `sessionLabel`, `source:{name,type}`, `file` (markdown/download), `app:{start, install?, prefix}` (app; `recordProblem` requires it), `bytes`, `files`.
+`artifact.json`: `schema`, `id`, `kind`, `project`, `title` (current), `createdAt`, `nextVersion`, `versions[]`. A record is validated on every read (`recordProblem` in `src/store.js`); a malformed or unparseable one is logged, left on disk, and excluded from `get`, `list` and `prune`. A version: `n`, `title`, `publishedAt`, `sessionId`, `sessionLabel` (cc's `displayLabel` stored as returned; cleaned only for display by `sessionText`/`plainLabel` in `frontend/src/lib/artifacts.ts`), `source:{name,type}`, `file` (markdown/download), `app:{start, install?, prefix}` (app; `recordProblem` requires it), `bytes`, `files`.
 
 - **Ids**: a slug of the title plus a random suffix; see `newId` in `src/store.js`. Every id matches `ID_RE`.
 - **Version numbers** come from `nextVersion` and are never reused. Latest is the last remaining entry (the highest `n`).

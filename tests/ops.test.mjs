@@ -82,6 +82,13 @@ test('the session label is snapshotted at publish; a failure leaves null and war
   assert.ok(warn.mock.callCount() >= 1);
 });
 
+test('the session label snapshot is cc\'s title-preferred displayLabel, not the first prompt', async (t) => {
+  const cc = await fakeCc(t, { instances: [{ sessionId: 'sess-1', title: 'Plan the fix', firstPrompt: '**Op task…', displayLabel: 'Plan the fix' }] });
+  const { ops, store } = await setup(t, { ccUrl: cc.url });
+  const r = await ops.publish({ path: await fixtureFile(t, 'a.md', 'x'), title: 'A' }, caller);
+  assert.equal((await store.get(r.id)).versions[0].sessionLabel, 'Plan the fix');
+});
+
 test('publish returns the documented shape with deep links', async (t) => {
   const { ops } = await setup(t);
   const r = await ops.publish({ path: await fixtureFile(t, 'a.md', '# hello'), title: 'Hello' }, caller);

@@ -58,9 +58,17 @@ try {
         await page.getByRole('heading', { name: 'Artifacts', level: 1 }).waitFor();
         await page.getByRole('link', { name: 'Release notes' }).waitFor();
         assert.deepEqual(await page.locator('section[aria-label] > h2').allTextContents(), ['demo', 'tools']);
-        assert.equal(await page.getByRole('link', { name: 'Open' }).count(), 5);
+        assert.equal(await page.getByRole('link', { name: 'Open' }).count(), 6);
         assert.equal(await page.getByText('Stopped', { exact: true }).count(), 2, 'both app rows show a status badge');
+        const plain = 'Operational task: fix the foo parser, see the spec and ship…';
+        await page.getByText(plain, { exact: true }).first().waitFor();
         await shot('list');
+
+        // A markdown session label shows as plain text on the detail view too.
+        await page.goto(`${world.url}/?artifact=${world.ids.labelled}`);
+        await page.getByRole('heading', { name: 'Labelled session', level: 1 }).waitFor();
+        await page.getByText(plain, { exact: true }).first().waitFor();
+        await shot('detail-label');
 
         // App detail: status, Start/Stop, the manifest and the (empty) log.
         await stopApps();

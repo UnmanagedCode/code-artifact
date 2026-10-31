@@ -1,7 +1,7 @@
 // Pins the pure UI logic: grouping/ordering, route parsing, which Open link is used, and the displayed texts.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { appActions, formatBytes, groupByProject, isTransient, openHref, parseRoute, relativeTime, sessionText, statusLabel } from '../frontend/src/lib/artifacts.ts';
+import { MAX_SESSION_LABEL, appActions, formatBytes, groupByProject, isTransient, openHref, parseRoute, plainLabel, relativeTime, sessionText, statusLabel } from '../frontend/src/lib/artifacts.ts';
 
 const art = (id, project, publishedAt) => ({
   id, project, title: id, kind: 'markdown', createdAt: publishedAt, link: `http://cc.internal/#plugin/code-artifact/a/${id}/`,
@@ -56,6 +56,50 @@ test('sessionText prefers the label, then the 8-character id, then "unknown sess
   assert.equal(sessionText({ sessionId: 'abcdef123456', sessionLabel: 'Fix bug' }), 'Fix bug');
   assert.equal(sessionText({ sessionId: 'abcdef123456', sessionLabel: null }), 'abcdef12');
   assert.equal(sessionText({ sessionId: null, sessionLabel: null }), 'unknown session');
+});
+
+test('plainLabel strips emphasis and inline code markers', () => {
+  assert.equal(plainLabel('**Operational task:** fix the `foo` parser'), 'Operational task: fix the foo parser');
+  assert.equal(plainLabel('**Operational task: fix __it__ ~~now~~ and *soon*'), 'Operational task: fix it now and soon');
+});
+
+test('plainLabel renders a link or image as its text, including a link cut before its ")"', () => {
+  assert.equal(plainLabel('see [the docs](https://example.com/x) now'), 'see the docs now');
+  assert.equal(plainLabel('![diagram](a.png) shown'), 'diagram shown');
+  assert.equal(plainLabel('read [the docs](https://exam'), 'read the docs');
+});
+
+test('plainLabel drops a leading heading, blockquote or list marker', () => {
+  assert.equal(plainLabel('## Plan'), 'Plan');
+  assert.equal(plainLabel('> note'), 'note');
+  assert.equal(plainLabel('- item'), 'item');
+  assert.equal(plainLabel('1. step'), 'step');
+});
+
+test('plainLabel collapses whitespace runs to one space and trims the ends', () => {
+  assert.equal(plainLabel('  a \n\t b   c  '), 'a b c');
+});
+
+test('plainLabel shortens past MAX_SESSION_LABEL at a word boundary with an ellipsis, and leaves a label of exactly that length alone', () => {
+  const long = Array.from({ length: 30 }, () => 'word').join(' ');
+  const out = plainLabel(long);
+  assert.ok(out.endsWith('…'));
+  assert.ok(Array.from(out).length <= MAX_SESSION_LABEL + 1);
+  assert.ok(long.startsWith(out.slice(0, -1)) && long[out.length - 1] === ' ');
+  const exact = 'x'.repeat(MAX_SESSION_LABEL);
+  assert.equal(plainLabel(exact), exact);
+  assert.equal(Array.from(plainLabel('😀'.repeat(MAX_SESSION_LABEL + 5))).length, MAX_SESSION_LABEL + 1);
+});
+
+test('sessionText falls back to the 8-character id when the label is only markup', () => {
+  assert.equal(sessionText({ sessionId: 'abcdef123456', sessionLabel: '**' }), 'abcdef12');
+  assert.equal(sessionText({ sessionId: 'abcdef123456', sessionLabel: '**Task:** `x`' }), 'Task: x');
+});
+
+test('plainLabel leaves an ordinary title byte-identical', () => {
+  for (const t of ['Fix the login bug', 'snake_case_name cleanup', 'C# port', '#42 regression', 'a*b refactor', 'v1.2 - release notes']) {
+    assert.equal(plainLabel(t), t);
+  }
 });
 
 test('relativeTime counts in the largest whole unit', () => {

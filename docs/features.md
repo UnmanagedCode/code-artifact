@@ -72,7 +72,7 @@ Worked example, `keep` (a Vite scaffold published without `node_modules`):
 
 - `project` defaults to the calling session's project. The conductor's own project is not a user project, so a conductor must pass `project`.
 - An explicit `project` must exist in cc (`PROJECT_UNKNOWN` otherwise).
-- `sessionId` defaults to the calling session; the session's label is snapshotted at publish, so the UI can name the session after it exits.
+- `sessionId` defaults to the calling session; the session's label is snapshotted at publish, so the UI can name the session after it exits. The snapshot is cc's display label: the session title if one is set at publish, else a preview of its first prompt. A title set later shows from the next `update_artifact`.
 
 ### Updating
 
@@ -99,8 +99,8 @@ Every version can be downloaded from `dl/<id>/<n>`; a static or app version down
 
 The plugin's own page (nav label "Artifacts"):
 
-- **List**: artifacts grouped by project (projects by name, artifacts newest first). Each row shows the title, kind, latest version, relative time, the publishing session (its label, else the 8-character id, else "unknown session"), and an **Open** link. An empty state names `publish_artifact`.
+- **List**: artifacts grouped by project (projects by name, artifacts newest first). Each row shows the title, kind, latest version, relative time, the publishing session (its label as plain text, else the 8-character id, else "unknown session"), and an **Open** link. Markdown in the label is stripped and a label longer than `MAX_SESSION_LABEL` (`frontend/src/lib/artifacts.ts`) is shortened at a word boundary with `…`. An empty state names `publish_artifact`.
 - **App rows and detail**: an app row shows a status badge. An app's detail view adds a panel with the status, **Start**, **Stop**, **Open**, the latest version's `start`, `install` and `prefix`, and the log tail (polled every second while installing or starting, else every 5 s).
-- **Detail** (`?artifact=<id>`): versions newest first with **Open** (pinned), **Download** and **Delete** (a confirm dialog; disabled on the last version), plus **Delete artifact**.
+- **Detail** (`?artifact=<id>`): versions newest first, each naming its session as the list does (`sessionText`), with **Open** (pinned), **Download** and **Delete** (a confirm dialog; disabled on the last version), plus **Delete artifact**.
 - **Delete old…**: deletes versions published more than N days ago, optionally for one project. A live dry-run count is shown first. Every artifact keeps its latest version.
 - Follows cc's light/dark theme and session width; works on a phone.
