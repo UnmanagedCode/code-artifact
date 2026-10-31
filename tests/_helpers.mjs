@@ -111,12 +111,19 @@ export async function deadUrl() {
   return `http://127.0.0.1:${port}`;
 }
 
-/** The backend on port 0 with its own temp store. Returns `{base, storeDir, get, post, del, mcp}`. */
-export async function startApp(t, { ccUrl = null, limits, distDir, storeDir, unconfigured = false } = {}) {
+/**
+ * The backend on port 0 with its own temp store. Returns `{base, storeDir, server, get, post, del, mcp}`.
+ * `appTimings` and `mount` go to the app host. Teardown stops every app before the store is removed.
+ */
+export async function startApp(t, { ccUrl = null, limits, distDir, storeDir, unconfigured = false, appTimings, mount } = {}) {
+  let server;
+  t.after(async () => {
+    await server?.apps.shutdown();
+    await new Promise((r) => { server.close(r); server.closeAllConnections(); });
+  });
   const dir = unconfigured ? null : (storeDir ?? path.join(await tmp(t), 'store'));
-  const server = await createServer({ storeDir: dir, ccUrl, limits, ...(distDir && { distDir }) });
+  server = await createServer({ storeDir: dir, ccUrl, limits, appTimings, mount, ...(distDir && { distDir }) });
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
-  t.after(() => new Promise((r) => { server.close(r); server.closeAllConnections(); }));
   const base = `http://127.0.0.1:${server.address().port}`;
   const json = { 'content-type': 'application/json' };
   const send = async (method, url, body, headers = json) => {
@@ -127,7 +134,7 @@ export async function startApp(t, { ccUrl = null, limits, distDir, storeDir, unc
     return { status: res.status, data, text, headers: res.headers };
   };
   return {
-    base, storeDir: dir,
+    base, storeDir: dir, server,
     get: (url) => send('GET', url),
     post: (url, body) => send('POST', url, body),
     del: (url) => send('DELETE', url, undefined),

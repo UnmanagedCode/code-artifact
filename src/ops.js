@@ -5,9 +5,12 @@ import { inspectSource } from './source.js';
 import { stageContent } from './ingest.js';
 import { LIMITS } from './limits.js';
 import { ID_RE, deepLink } from './links.js';
+import { readTail } from './appLog.js';
 
 /** Upper bound for `olderThanDays` (about 270 years), so the cutoff is always a valid date. */
 const MAX_PRUNE_DAYS = 100_000;
+const DEFAULT_LOG_BYTES = 64 * 1024;
+const MAX_LOG_BYTES = 1024 * 1024;
 const PROJECT_RE = /^[a-zA-Z0-9._-]+$/;
 
 const bad = (msg) => new Refusal('INVALID_ARGUMENT', msg);
@@ -54,9 +57,9 @@ export const withLinks = (r) => ({
 
 /**
  * The operations behind both the MCP tools and the REST API.
- * `store` is a Store, or a function returning one (it may throw STORE_UNCONFIGURED).
+ * `store` is a Store, or a function returning one (it may throw STORE_UNCONFIGURED); `apps` is the app host.
  */
-export function createOps({ store: storeOrGetter, cc, limits = LIMITS }) {
+export function createOps({ store: storeOrGetter, cc, apps, limits = LIMITS }) {
   const getStore = () => (typeof storeOrGetter === 'function' ? storeOrGetter() : storeOrGetter);
 
   async function resolveProject(args, caller) {
@@ -83,7 +86,7 @@ export function createOps({ store: storeOrGetter, cc, limits = LIMITS }) {
       const sessionLabel = await cc.sessionLabel(sessionId);
       const version = {
         sessionId, sessionLabel, source: { name: info.name, type: info.type },
-        ...(staged.file ? { file: staged.file } : {}), bytes: staged.bytes, files: staged.files,
+        ...(staged.file ? { file: staged.file } : {}), ...(staged.app ? { app: staged.app } : {}), bytes: staged.bytes, files: staged.files,
       };
       return await commit({ kind, version, staging });
     } finally {
@@ -91,11 +94,25 @@ export function createOps({ store: storeOrGetter, cc, limits = LIMITS }) {
     }
   }
 
+  /** `withLinks`, plus the live process state on an app record. */
+  const decorate = (r) => (r.kind === 'app' ? { ...withLinks(r), app: apps.status(r.id) } : withLinks(r));
+
+  /** The app record for `id`, or the refusal an app route owes. */
+  async function appRecord(args) {
+    checkKeys(args, ['artifact', 'bytes']);
+    const id = str(args, 'artifact', { max: 48, pattern: ID_RE, required: true });
+    const record = await getStore().get(id);
+    if (!record) throw new Refusal('ARTIFACT_UNKNOWN', `no artifact ${id}`);
+    if (record.kind !== 'app') throw new Refusal('NOT_AN_APP', `artifact ${id} is a ${record.kind}, not an app`);
+    return record;
+  }
+
   const published = (record, extra) => {
     const v = record.versions[record.versions.length - 1];
     return {
       id: record.id, title: record.title, kind: record.kind, project: record.project, version: v.n, sessionId: v.sessionId,
-      link: deepLink(record.id), versionLink: deepLink(record.id, v.n), bytes: v.bytes, files: v.files, ...extra,
+      link: deepLink(record.id), versionLink: deepLink(record.id, v.n), bytes: v.bytes, files: v.files,
+      ...(record.kind === 'app' ? { app: { status: apps.status(record.id).status } } : {}), ...extra,
     };
   };
 
@@ -127,6 +144,7 @@ export function createOps({ store: storeOrGetter, cc, limits = LIMITS }) {
       if (!current) throw new Refusal('ARTIFACT_UNKNOWN', `no artifact ${id}`);
       const record = await ingest(store, { ...args, path }, caller, current.kind, ({ version, staging }) =>
         store.addVersion(id, { title, version }, staging));
+      if (record.kind === 'app') await apps.restartIfActive(id);
       return published(record);
     },
 
@@ -134,7 +152,7 @@ export function createOps({ store: storeOrGetter, cc, limits = LIMITS }) {
       checkKeys(args, ['project', 'kind']);
       const project = str(args, 'project', { max: 100, pattern: PROJECT_RE });
       const kind = kindArg(args);
-      return { artifacts: (await getStore().list({ project, kind })).map(withLinks) };
+      return { artifacts: (await getStore().list({ project, kind })).map(decorate) };
     },
 
     async get(args) {
@@ -142,7 +160,7 @@ export function createOps({ store: storeOrGetter, cc, limits = LIMITS }) {
       const id = str(args, 'artifact', { max: 48, pattern: ID_RE, required: true });
       const record = await getStore().get(id);
       if (!record) throw new Refusal('ARTIFACT_UNKNOWN', `no artifact ${id}`);
-      return withLinks(record);
+      return decorate(record);
     },
 
     async remove(args) {
@@ -151,10 +169,15 @@ export function createOps({ store: storeOrGetter, cc, limits = LIMITS }) {
       const version = int(args, 'version');
       const store = getStore();
       if (version === undefined) {
-        await store.deleteArtifact(id);
+        await apps.exclusive(id, () => store.deleteArtifact(id), { stopVersion: 'any' });
         return { deleted: 'artifact', id };
       }
-      const record = await store.deleteVersion(id, version);
+      // The app stops only when it runs the version going away; a refused delete must not stop it.
+      const current = await store.get(id);
+      const stoppable = current && current.versions.length > 1 && current.versions.some((v) => v.n === version);
+      const record = stoppable
+        ? await apps.exclusive(id, () => store.deleteVersion(id, version), { stopVersion: version })
+        : await store.deleteVersion(id, version);
       return { deleted: 'version', id, version, latest: record.versions[record.versions.length - 1].n };
     },
 
@@ -164,7 +187,32 @@ export function createOps({ store: storeOrGetter, cc, limits = LIMITS }) {
       if (olderThanDays > MAX_PRUNE_DAYS) throw bad(`olderThanDays must be at most ${MAX_PRUNE_DAYS}`);
       const project = str(args, 'project', { max: 100, pattern: PROJECT_RE });
       if (args.dryRun !== undefined && typeof args.dryRun !== 'boolean') throw bad('dryRun must be a boolean');
-      return getStore().prune({ olderThanDays, project, dryRun: args.dryRun === true });
+      return getStore().prune({
+        olderThanDays, project, dryRun: args.dryRun === true, keep: (id, n) => apps.activeVersion(id) === n,
+      });
+    },
+
+    async appStatus(args) {
+      const record = await appRecord(args);
+      return { id: record.id, ...apps.status(record.id) };
+    },
+
+    async appStart(args) {
+      const record = await appRecord(args);
+      return { id: record.id, ...(await apps.start(record.id)) };
+    },
+
+    async appStop(args) {
+      const record = await appRecord(args);
+      return { id: record.id, ...(await apps.stop(record.id)) };
+    },
+
+    /** The last `bytes` bytes of the app's log as text. */
+    async appLog(args) {
+      const record = await appRecord(args);
+      const bytes = args.bytes ?? DEFAULT_LOG_BYTES;
+      if (!Number.isInteger(bytes) || bytes < 1 || bytes > MAX_LOG_BYTES) throw bad(`bytes must be an integer from 1 to ${MAX_LOG_BYTES}`);
+      return readTail(getStore().logFile(record.id), bytes);
     },
   };
 }
