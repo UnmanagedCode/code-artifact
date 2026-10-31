@@ -114,7 +114,7 @@ export function App() {
     <main className="mx-auto min-h-full w-full max-w-[var(--cc-session-width,48rem)] p-4 pb-12">
       {route.view === 'list' && (
         <div className="mb-4 flex items-center justify-between gap-3">
-          <h1 className="text-xl font-semibold">Artifacts</h1>
+          <h1 className="text-xl font-semibold">Code Artifact</h1>
           <Button type="button" variant="outline" size="sm" onClick={() => setPruneOpen(true)} disabled={!artifacts?.length}>
             <Trash2Icon /> Delete old…
           </Button>
