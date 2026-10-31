@@ -97,6 +97,25 @@ test('plainLabel backs up to the last space only when it falls past halfway, jud
   assert.equal(plainLabel(emoji), '😀'.repeat(20) + ' ' + 'y'.repeat(MAX_SESSION_LABEL - 21) + '…');
 });
 
+test('plainLabel strips a single "_" at the start of a word', () => {
+  assert.equal(plainLabel('_emphasis_ here'), 'emphasis here');
+  assert.equal(plainLabel('_start of label'), 'start of label');
+  assert.equal(plainLabel('see (_this) now'), 'see (this) now');
+});
+
+test('plainLabel strips a single "_" at the end of a word: before a space, before punctuation and at the end', () => {
+  assert.equal(plainLabel('finish_ now'), 'finish now');
+  assert.equal(plainLabel('what_, yes'), 'what, yes');
+  assert.equal(plainLabel('(see this_) now'), '(see this) now');
+  assert.equal(plainLabel('end with_'), 'end with');
+});
+
+test('plainLabel backs up to the last space in the kept prefix, not the first', () => {
+  const tail = 'y'.repeat(40);
+  assert.equal(plainLabel(`ab ${'x'.repeat(40)} ${tail}`), `ab ${'x'.repeat(40)}…`);
+  assert.equal(plainLabel(`${'x'.repeat(35)} ${'y'.repeat(14)} ${'z'.repeat(30)}`), `${'x'.repeat(35)} ${'y'.repeat(14)}…`);
+});
+
 test('sessionText falls back to the 8-character id when the label is only markup', () => {
   assert.equal(sessionText({ sessionId: 'abcdef123456', sessionLabel: '**' }), 'abcdef12');
   assert.equal(sessionText({ sessionId: 'abcdef123456', sessionLabel: '**Task:** `x`' }), 'Task: x');
