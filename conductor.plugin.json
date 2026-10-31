@@ -5,6 +5,7 @@
   "pluginApi": 1,
   "backend": { "start": "npm start", "healthPath": "/api/health", "readyWhen": "listening" },
   "frontend": { "path": "/", "navLabel": "Code Artifact" },
+  "menuItems": [{ "label": "Show artifacts", "scope": "project", "path": "/" }],
   "mcp": {
     "endpoint": "/api/mcp",
     "timeoutMs": 120000,

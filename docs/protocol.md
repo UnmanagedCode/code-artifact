@@ -4,7 +4,18 @@ Interface contracts. Everything is relative to the plugin root; cc mounts it at 
 
 ## Manifest
 
-`conductor.plugin.json`: `id` `code-artifact`, `pluginApi` 1, backend `npm start` (health `/api/health`, ready when stdout matches `listening`), frontend `/` labelled "Code Artifact", MCP endpoint `/api/mcp`.
+`conductor.plugin.json`: `id` `code-artifact`, `pluginApi` 1, backend `npm start` (health `/api/health`, ready when stdout matches `listening`), frontend `/` labelled "Code Artifact", `menuItems` (one project-scope item, "Show artifacts", at `/`), MCP endpoint `/api/mcp`.
+
+## UI query
+
+The UI document (`/`) routes on its query string (`parseRoute`, `routeSearch` and `menuArrival` in `frontend/src/lib/artifacts.ts`).
+
+| Param | Meaning |
+|---|---|
+| `project` | List filter, exact and case-sensitive; kept on the detail so its Back returns to the filtered list |
+| `artifact` | Detail view of that artifact id |
+| `ccProject` | From cc's ⋮ menu (`menuItems`): shows that project's list. Replaced in place (`history.replaceState`) with `project`. An empty `ccProject`, or `ccWorktree` alone, shows an alert and keeps the route |
+| `ccWorktree` | From cc's ⋮ menu; ignored (no worktree items), removed with `ccProject` |
 
 ## MCP wire contract
 

@@ -1,7 +1,7 @@
-// Pins the pure UI logic: grouping/ordering, route parsing, which Open link is used, and the displayed texts.
+// Pins the pure UI logic: grouping/ordering, route parsing and writing, the project filter, cc menu arrival, which Open link is used, and the displayed texts.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { MAX_SESSION_LABEL, appActions, formatBytes, groupByProject, isTransient, openHref, parseRoute, plainLabel, relativeTime, sessionText, statusLabel } from '../frontend/src/lib/artifacts.ts';
+import { MAX_SESSION_LABEL, appActions, filterByProject, formatBytes, groupByProject, isTransient, menuArrival, openHref, parseRoute, plainLabel, relativeTime, routeSearch, sessionText, statusLabel } from '../frontend/src/lib/artifacts.ts';
 
 const art = (id, project, publishedAt) => ({
   id, project, title: id, kind: 'markdown', createdAt: publishedAt, link: `http://cc.internal/#plugin/code-artifact/a/${id}/`,
@@ -27,11 +27,80 @@ test('groupByProject orders by the latest version, not the first', () => {
 test('groupByProject of nothing is empty', () => assert.deepEqual(groupByProject([]), []));
 
 test('parseRoute reads the artifact from the query string', () => {
-  assert.deepEqual(parseRoute(''), { view: 'list' });
-  assert.deepEqual(parseRoute('?'), { view: 'list' });
-  assert.deepEqual(parseRoute('?artifact=notes-abc123'), { view: 'detail', id: 'notes-abc123' });
-  assert.deepEqual(parseRoute('?ccProject=x&artifact=a-b'), { view: 'detail', id: 'a-b' });
-  assert.deepEqual(parseRoute('?artifact='), { view: 'list' });
+  assert.deepEqual(parseRoute(''), { view: 'list', project: null });
+  assert.deepEqual(parseRoute('?'), { view: 'list', project: null });
+  assert.deepEqual(parseRoute('?artifact=notes-abc123'), { view: 'detail', id: 'notes-abc123', project: null });
+  assert.deepEqual(parseRoute('?ccProject=x&artifact=a-b'), { view: 'detail', id: 'a-b', project: null });
+  assert.deepEqual(parseRoute('?artifact='), { view: 'list', project: null });
+});
+
+test('parseRoute reads the project filter', () => {
+  assert.deepEqual(parseRoute('?project=demo'), { view: 'list', project: 'demo' });
+  assert.deepEqual(parseRoute('?project=demo&artifact=a'), { view: 'detail', id: 'a', project: 'demo' });
+  assert.deepEqual(parseRoute('?project='), { view: 'list', project: null });
+});
+
+test('routeSearch round-trips through parseRoute', () => {
+  const routes = [
+    { view: 'list', project: null },
+    { view: 'list', project: 'demo' },
+    { view: 'detail', id: 'a-b', project: null },
+    { view: 'detail', id: 'a-b', project: 'demo' },
+    { view: 'list', project: 'x&artifact=y' },
+    { view: 'list', project: 'a b#c%d' },
+    { view: 'detail', id: 'a-b', project: 'x&artifact=y' },
+  ];
+  for (const r of routes) assert.deepEqual(parseRoute(routeSearch(r)), r, JSON.stringify(r));
+  assert.equal(routeSearch({ view: 'list', project: null }), '?');
+});
+
+const LIST = { view: 'list', project: null };
+const DETAIL = { view: 'detail', id: 'a-b', project: 'tools' };
+
+test('menu: a query with neither cc param is not an arrival', () => {
+  for (const q of ['', '?', '?artifact=a', '?project=p']) assert.equal(menuArrival(q, LIST), null, q);
+});
+
+test('menu: ?ccProject shows that project\'s list and replaces the query with ?project=', () => {
+  for (const current of [LIST, DETAIL]) {
+    const a = menuArrival('?ccProject=demo', current);
+    assert.deepEqual(a.route, { view: 'list', project: 'demo' });
+    assert.equal(a.notice, null);
+    assert.equal(a.search, '?project=demo');
+  }
+});
+
+test('menu: ?ccWorktree is ignored at project scope', () => {
+  assert.deepEqual(menuArrival('?ccProject=demo&ccWorktree=wt', DETAIL), menuArrival('?ccProject=demo', DETAIL));
+});
+
+test('menu: a missing or empty ccProject leaves the route as it was and reports a notice', () => {
+  for (const current of [LIST, DETAIL]) {
+    for (const q of ['?ccWorktree=wt', '?ccProject=', '?ccProject=&ccWorktree=wt']) {
+      const a = menuArrival(q, current);
+      assert.deepEqual(a.route, current, q);
+      assert.equal(typeof a.notice, 'string', q);
+      assert.ok(a.notice.length > 0, q);
+      assert.equal(a.search, routeSearch(current), q);
+    }
+  }
+});
+
+test('menu: the replacement query never carries a cc param', () => {
+  const queries = ['?ccProject=demo', '?ccProject=demo&ccWorktree=wt', '?ccWorktree=wt', '?ccProject=', '?ccProject=&ccWorktree=wt', '?ccProject=x%26ccProject%3Dy'];
+  for (const current of [LIST, DETAIL]) {
+    for (const q of queries) {
+      const params = new URLSearchParams(menuArrival(q, current).search);
+      assert.ok(!params.has('ccProject') && !params.has('ccWorktree'), q);
+    }
+  }
+});
+
+test('filterByProject keeps exact matches only', () => {
+  const all = [art('a', 'demo', '2026-01-01T00:00:00Z'), art('b', 'Demo', '2026-01-01T00:00:00Z'), art('c', 'demo2', '2026-01-01T00:00:00Z')];
+  assert.deepEqual(filterByProject(all, null), all);
+  assert.deepEqual(filterByProject(all, 'demo').map((x) => x.id), ['a']);
+  assert.deepEqual(filterByProject(all, 'nope'), []);
 });
 
 test('openHref picks the cc.internal link when embedded and a relative link otherwise', () => {

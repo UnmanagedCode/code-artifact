@@ -102,5 +102,15 @@ The plugin's own page (nav label "Code Artifact"):
 - **List**: artifacts grouped by project (projects by name, artifacts newest first). Each row shows the title, kind, latest version, relative time, the publishing session (its label as plain text, else the 8-character id, else "unknown session"), and an **Open** link. Markdown in the label is stripped and a label longer than `MAX_SESSION_LABEL` (`frontend/src/lib/artifacts.ts`) is cut to at most that many code points, backing up to the last space only when it falls past halfway, with `…` appended. The session text is constrained to its card (truncated in the list, wrapped in the detail), so a long unbroken label never widens the page. An empty state names `publish_artifact`.
 - **App rows and detail**: an app row shows a status badge. An app's detail view adds a panel with the status, **Start**, **Stop**, **Open**, the latest version's `start`, `install` and `prefix`, and the log tail (polled every second while installing or starting, else every 5 s).
 - **Detail** (`?artifact=<id>`): versions newest first, each naming its session as the list does (`sessionText`), with **Open** (pinned), **Download** and **Delete** (a confirm dialog; disabled on the last version), plus **Delete artifact**.
+- **Project filter** (`?project=<name>`): the list shows only that project, under a strip with the name as text and **Show all**. The filter carries through the detail (`?project=<name>&artifact=<id>`); its Back and **Delete artifact** return to the filtered list. With no artifacts in that project, the empty state names it.
 - **Delete old…**: deletes versions published more than N days ago, optionally for one project. A live dry-run count is shown first. Every artifact keeps its latest version.
 - Follows cc's light/dark theme and session width; works on a phone.
+
+### Open from code-conductor
+
+- **Show artifacts** sits in the ⋮ menu of each project row in cc's sidebar, under "Code Artifact". Worktree rows have none: an artifact belongs to a project, not a worktree.
+- A click opens the list filtered to that project (see **Project filter**) and fetches the list afresh. An already-open page switches in place, without a reload.
+- cc's query is replaced in place with `?project=<name>`, so a reload or Back never repeats the click.
+- A name with no artifacts (cc lists only live projects) shows the project's empty state.
+- A click that names no project shows an alert with **Dismiss** and leaves the view as it was. Any later navigation, Back included, clears the alert.
+- A click only reads: it never creates, publishes or deletes anything.

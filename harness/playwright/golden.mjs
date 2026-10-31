@@ -1,4 +1,4 @@
-// Golden-path visual check: boots the backend on a seeded sandbox store, drives the list, detail, prune dialog and
+// Golden-path visual check: boots the backend on a seeded sandbox store, drives the list, detail, prune dialog, cc ⋮ menu arrival and
 // the markdown, download and static pages, and saves a screenshot per step in light and dark and at phone width.
 // Run: node harness/playwright/golden.mjs   (needs `npm install` first, for frontend/dist; export CC_PROJECTS_ROOT outside cc)
 import assert from 'node:assert/strict';
@@ -124,6 +124,74 @@ try {
         await shot('prune');
         await page.getByRole('button', { name: 'Cancel' }).click();
         await page.getByRole('dialog').waitFor({ state: 'hidden' });
+
+        // cc ⋮ "Show artifacts": the project's list on load, with the cc query replaced in place.
+        const sections = () => page.locator('section[aria-label] > h2').allTextContents();
+        const search = () => page.evaluate(() => location.search);
+        // What cc's navigate does on an already-open page: replaceState plus a synthetic popstate, never a load.
+        const navigate = (q) => page.evaluate((q) => { history.replaceState(null, '', q); dispatchEvent(new PopStateEvent('popstate')); }, q);
+        await page.goto(`${world.url}/?ccProject=demo`);
+        await page.getByRole('link', { name: 'Release notes' }).waitFor();
+        assert.equal(await search(), '?project=demo');
+        assert.deepEqual(await sections(), ['demo']);
+        assert.ok(await page.getByRole('button', { name: 'Show all' }).isVisible());
+        await shot('menu-project');
+        assert.ok(await fits(), `menu project list overflows at ${vname} width`);
+
+        // Retarget in place: a fresh list fetch, no reload, no new history entry.
+        await page.evaluate(() => { window.__marker = 1; });
+        const historyLength = await page.evaluate(() => history.length);
+        await Promise.all([page.waitForRequest((r) => /\/api\/artifacts$/.test(r.url())), navigate('?ccProject=tools')]);
+        await page.getByRole('link', { name: 'Demo site' }).waitFor();
+        assert.equal(await page.evaluate(() => window.__marker), 1, 'navigate must not reload the page');
+        assert.deepEqual(await sections(), ['tools']);
+        assert.equal(await search(), '?project=tools');
+        assert.equal(await page.evaluate(() => history.length), historyLength);
+
+        // An unknown name is an empty project; a hostile one stays text.
+        await page.goto(`${world.url}/?ccProject=nope`);
+        await page.getByText(/No artifacts in project “nope” yet/).waitFor();
+        await shot('menu-empty');
+        await page.goto(`${world.url}/?ccProject=%3Cb%3Ex%3C%2Fb%3E`);
+        await page.getByText('No artifacts in project “<b>x</b>” yet', { exact: false }).waitFor();
+        assert.equal(await page.locator('main b').count(), 0);
+
+        // No project named: an alert, and the view stays as it was.
+        await page.goto(`${world.url}/?project=demo`);
+        await page.getByRole('link', { name: 'Release notes' }).waitFor();
+        await navigate('?ccWorktree=wt');
+        await page.getByRole('alert').filter({ hasText: /named no project/ }).waitFor();
+        assert.deepEqual(await sections(), ['demo']);
+        assert.equal(await search(), '?project=demo');
+        await shot('menu-notice');
+        assert.ok(await fits(), `menu notice overflows at ${vname} width`);
+
+        // The filter carries through the detail and its Back; Show all drops it. A row's href matches where its click goes.
+        const rowHref = async () => new URL(await page.getByRole('link', { name: 'Release notes' }).getAttribute('href'), world.url).searchParams;
+        assert.equal((await rowHref()).get('project'), 'demo', 'a filtered row link keeps the filter');
+        await page.getByRole('link', { name: 'Release notes' }).click();
+        await page.getByRole('heading', { name: 'Release notes', level: 1 }).waitFor();
+        assert.equal(new URL(page.url()).searchParams.get('project'), 'demo');
+        await page.getByRole('button', { name: 'Artifacts' }).click();
+        await page.getByRole('button', { name: 'Show all' }).waitFor();
+        assert.equal(await search(), '?project=demo');
+        assert.deepEqual(await sections(), ['demo']);
+        await page.getByRole('button', { name: 'Show all' }).click();
+        await page.getByRole('link', { name: 'Demo site' }).waitFor();
+        assert.deepEqual(await sections(), ['demo', 'tools']);
+        assert.equal(await search(), '', 'an empty query: location.search reads "" for a bare "?"');
+        assert.ok(!(await rowHref()).has('project'), 'an unfiltered row link carries no project');
+
+        // A plain Back after the notice clears it.
+        await page.goto(`${world.url}/?project=demo`);
+        await page.getByRole('link', { name: 'Release notes' }).click();
+        await page.getByRole('heading', { name: 'Release notes', level: 1 }).waitFor();
+        await navigate('?ccWorktree=wt');
+        await page.getByRole('alert').filter({ hasText: /named no project/ }).waitFor();
+        await page.goBack();
+        await page.getByRole('button', { name: 'Show all' }).waitFor();
+        assert.equal(await search(), '?project=demo');
+        assert.equal(await page.getByRole('alert').count(), 0, 'Back clears the notice');
 
         // Server-rendered pages.
         await page.goto(`${world.url}/a/${world.ids.markdown}/`);

@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Trash2Icon } from 'lucide-react';
 import { api } from '@/lib/api';
 import { isEmbedded } from '@/lib/theme';
-import { parseRoute, type AppStatus, type ArtifactRec, type Route } from '@/lib/artifacts';
+import { filterByProject, menuArrival, parseRoute, routeSearch, type AppStatus, type ArtifactRec, type Route } from '@/lib/artifacts';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { ArtifactList } from '@/components/ArtifactList';
@@ -13,7 +13,12 @@ import { PruneDialog } from '@/components/PruneDialog';
 const JSON_HEADERS = { 'Content-Type': 'application/json' };
 
 export function App() {
-  const [route, setRoute] = useState<Route>(() => parseRoute(location.search));
+  // A cc ⋮ menu click arrives as `?ccProject=…`: in the frame src on first load, or via cc's navigate (replaceState + popstate).
+  const [arrival] = useState(() => menuArrival(location.search, parseRoute(location.search)));
+  const [route, setRoute] = useState<Route>(() => arrival?.route ?? parseRoute(location.search));
+  const [notice, setNotice] = useState<string | null>(() => arrival?.notice ?? null);
+  const routeRef = useRef(route);
+  routeRef.current = route;
   const [artifacts, setArtifacts] = useState<ArtifactRec[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [confirm, setConfirm] = useState<ConfirmState | null>(null);
@@ -32,22 +37,36 @@ export function App() {
   }, []);
 
   useEffect(() => { void load(); }, [load]);
+  // The cc query is replaced in place, so a reload or Back never repeats the click.
+  useEffect(() => { if (arrival) history.replaceState(null, '', arrival.search); }, [arrival]);
   useEffect(() => {
-    const onPop = () => setRoute(parseRoute(location.search));
+    const onPop = () => {
+      const a = menuArrival(location.search, routeRef.current);
+      if (!a) {
+        setRoute(parseRoute(location.search));
+        setNotice(null);
+        return;
+      }
+      history.replaceState(null, '', a.search);
+      setRoute(a.route);
+      setNotice(a.notice);
+      if (!a.notice) void load();
+    };
     window.addEventListener('popstate', onPop);
     return () => window.removeEventListener('popstate', onPop);
-  }, []);
+  }, [load]);
 
   // The detail view polls a running app; keep the list's badge in step with what it saw.
   const onAppStatus = useCallback((id: string, app: AppStatus) => {
     setArtifacts((prev) => prev?.map((a) => (a.id === id ? { ...a, app } : a)) ?? prev);
   }, []);
 
-  const go = (search: string) => {
-    history.pushState(null, '', search);
-    setRoute(parseRoute(location.search));
+  const go = (next: Route) => {
+    history.pushState(null, '', routeSearch(next));
+    setRoute(next);
+    setNotice(null);
   };
-  const toList = () => go('?');
+  const toList = () => go({ view: 'list', project: route.project });
 
   const remove = (path: string) => api(path, { method: 'DELETE', headers: JSON_HEADERS });
   const ask = (state: ConfirmState) => { setConfirmError(null); setConfirm(state); };
@@ -107,7 +126,14 @@ export function App() {
       </div>
     );
   } else {
-    body = <ArtifactList artifacts={artifacts} embedded={embedded} onOpenDetail={(id) => go(`?artifact=${encodeURIComponent(id)}`)} />;
+    body = (
+      <ArtifactList
+        artifacts={filterByProject(artifacts, route.project)}
+        project={route.project}
+        embedded={embedded}
+        onOpenDetail={(id) => go({ view: 'detail', id, project: route.project })}
+      />
+    );
   }
 
   return (
@@ -119,6 +145,20 @@ export function App() {
             <Trash2Icon /> Delete old…
           </Button>
         </div>
+      )}
+      {route.view === 'list' && route.project !== null && (
+        <div className="mb-4 flex flex-wrap items-center gap-2 text-sm">
+          <span className="min-w-0">Project: <span className="font-medium break-all">{route.project}</span></span>
+          <Button type="button" variant="outline" size="sm" onClick={() => go({ view: 'list', project: null })}>Show all</Button>
+        </div>
+      )}
+      {notice && (
+        <Alert variant="destructive" className="mb-4">
+          <AlertDescription className="flex flex-wrap items-center gap-3">
+            <span>{notice}</span>
+            <Button type="button" variant="outline" size="sm" onClick={() => setNotice(null)}>Dismiss</Button>
+          </AlertDescription>
+        </Alert>
       )}
       {body}
       <ConfirmDialog state={confirm} busy={busy} error={confirmError} onCancel={() => setConfirm(null)} onConfirm={() => void runConfirm()} />

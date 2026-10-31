@@ -1,4 +1,4 @@
-// Pins the manifest: identity, flat tool schemas inside cc's validator subset, tool names equal the handler names, health path answers.
+// Pins the manifest: identity, flat tool schemas inside cc's validator subset, tool names equal the handler names, health path answers, menu items.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fsp from 'node:fs/promises';
@@ -61,4 +61,14 @@ test('the kind descriptions do not call app unsupported, and publish explains th
   assert.doesNotMatch(text, /not supported yet/);
   const publish = manifest.mcp.tools.find((t) => t.name === 'publish_artifact');
   assert.match(publish.description, /artifact\.json/);
+});
+
+test('menuItems open the UI root at project scope only', () => {
+  assert.ok(Array.isArray(manifest.menuItems) && manifest.menuItems.length > 0);
+  for (const item of manifest.menuItems) {
+    assert.deepEqual(Object.keys(item).sort(), ['label', 'path', 'scope']);
+    assert.ok(item.label.trim().length > 0);
+    assert.equal(item.scope, 'project', 'artifacts carry no worktree');
+    assert.equal(item.path, manifest.frontend.path, 'only the UI document handles a menu arrival');
+  }
 });
