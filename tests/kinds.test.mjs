@@ -28,14 +28,15 @@ test('a dir with index.html is static; any other dir is a download', async (t) =
   assert.equal(await kindOf(await fixtureDir(t, { 'sub/index.html': 'x' })), 'download', 'only a root index.html counts');
 });
 
-test('a dir with artifact.json is app, which is refused as KIND_NOT_SUPPORTED even beside index.html', async (t) => {
+test('a dir with artifact.json is app, even beside index.html', async (t) => {
   const dir = await fixtureDir(t, { 'artifact.json': '{}', 'index.html': 'x' });
-  await assert.rejects(kindOf(dir), refusal('KIND_NOT_SUPPORTED'));
+  assert.equal(await kindOf(dir), 'app');
 });
 
-test('an explicit app kind is refused with a pointer to static', async (t) => {
-  const dir = await fixtureDir(t, { 'index.html': 'x' });
-  await assert.rejects(kindOf(dir, 'app'), (e) => e.code === 'KIND_NOT_SUPPORTED' && /static/.test(e.message));
+test('an explicit app kind needs a root artifact.json, else KIND_SOURCE_MISMATCH', async (t) => {
+  await assert.rejects(kindOf(await fixtureDir(t, { 'index.html': 'x' }), 'app'), refusal('KIND_SOURCE_MISMATCH'));
+  await assert.rejects(kindOf(await fixtureFile(t, 'artifact.json', '{}'), 'app'), refusal('KIND_SOURCE_MISMATCH'), 'a lone file is never an app');
+  assert.equal(await kindOf(await fixtureDir(t, { 'artifact.json': '{}' }), 'app'), 'app');
 });
 
 test('a tarball with a root or sole-top-dir index.html is static; otherwise a download', async (t) => {
@@ -46,9 +47,12 @@ test('a tarball with a root or sole-top-dir index.html is static; otherwise a do
   assert.equal(await kindOf(await packDir(t, plain)), 'download');
 });
 
-test('a tarball with a root artifact.json is app, refused', async (t) => {
+test('a tarball with a root artifact.json is app, inferred or explicit', async (t) => {
   const dir = await fixtureDir(t, { 'artifact.json': '{}' }, 'dist');
-  await assert.rejects(kindOf(await packDir(t, dir, { wrap: true })), refusal('KIND_NOT_SUPPORTED'));
+  assert.equal(await kindOf(await packDir(t, dir, { wrap: true })), 'app');
+  assert.equal(await kindOf(await packDir(t, dir), 'app'), 'app');
+  const plain = await fixtureDir(t, { 'a.txt': 'x' }, 'dist');
+  await assert.rejects(kindOf(await packDir(t, plain), 'app'), refusal('KIND_SOURCE_MISMATCH'));
 });
 
 test('the sole-top-dir rule strips one level only and only for a single directory root', async (t) => {

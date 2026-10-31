@@ -5,6 +5,7 @@ import * as tar from 'tar';
 import { Refusal } from './refusal.js';
 import { LIMITS } from './limits.js';
 import { renderMarkdown } from './markdown.js';
+import { APP_MANIFEST, readAppManifest } from './appManifest.js';
 
 /** The directory under a staging dir that holds the served content. */
 export const CONTENT = 'content';
@@ -84,7 +85,7 @@ async function extractTarball(info, contentDir, limits) {
 
 /**
  * Copies `info`'s source into `stagingDir` as `content/` (plus `rendered.html` for markdown).
- * Resolves to `{bytes, files, file?}`: `file` is the stored name for markdown and download.
+ * Resolves to `{bytes, files, file?, app?}`: `file` is the stored name for markdown and download, `app` the parsed manifest.
  * The source is never modified. On failure the caller removes `stagingDir`.
  */
 export async function stageContent(info, kind, stagingDir, limits = LIMITS) {
@@ -116,7 +117,7 @@ export async function stageContent(info, kind, stagingDir, limits = LIMITS) {
     return { bytes: size, files: walked.files.length, file };
   }
 
-  // static
+  // static or app
   let walked;
   if (info.type === 'file') {
     if (info.size > limits.maxBytes) throw tooLarge();
@@ -128,6 +129,10 @@ export async function stageContent(info, kind, stagingDir, limits = LIMITS) {
     await copyTree(info.path, contentDir, walked);
   } else {
     walked = await extractTarball(info, contentDir, limits);
+  }
+  if (kind === 'app') {
+    const app = await readAppManifest(path.join(contentDir, APP_MANIFEST));
+    return { bytes: walked.bytes, files: walked.files.length, app };
   }
   await checkReserved(contentDir);
   return { bytes: walked.bytes, files: walked.files.length };

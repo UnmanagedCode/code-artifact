@@ -1,4 +1,5 @@
 import { Refusal } from './refusal.js';
+import { APP_MANIFEST } from './appManifest.js';
 
 export const KINDS = ['markdown', 'static', 'download', 'app'];
 
@@ -11,7 +12,7 @@ function infer(info) {
     if (/\.md$/i.test(info.name)) return 'markdown';
     return isHtml(info.name) ? 'static' : 'download';
   }
-  if (hasRoot(info, 'artifact.json')) return 'app';
+  if (hasRoot(info, APP_MANIFEST)) return 'app';
   return hasRoot(info, 'index.html') ? 'static' : 'download';
 }
 
@@ -19,19 +20,17 @@ function compatible(info, kind) {
   switch (kind) {
     case 'markdown': return info.type === 'file';
     case 'static': return info.type === 'file' ? isHtml(info.name) : hasRoot(info, 'index.html');
+    case 'app': return info.type !== 'file' && hasRoot(info, APP_MANIFEST);
     default: return true; // download keeps any source
   }
 }
 
-/** The kind to publish `info` as: `explicit` when compatible, else inferred. `app` is refused in either case. */
+/** The kind to publish `info` as: `explicit` when given, else inferred; refused when the source does not fit it. */
 export function resolveKind(info, explicit) {
   if (explicit !== undefined && !KINDS.includes(explicit)) {
     throw new Refusal('INVALID_ARGUMENT', `kind must be one of ${KINDS.join(', ')}`);
   }
   const kind = explicit ?? infer(info);
-  if (kind === 'app') {
-    throw new Refusal('KIND_NOT_SUPPORTED', 'kind "app" is not supported yet; pass kind:"static" to publish the directory as a static site');
-  }
   if (!compatible(info, kind)) {
     throw new Refusal('KIND_SOURCE_MISMATCH', `${info.name} (${info.type}) cannot be published as kind "${kind}"`);
   }
