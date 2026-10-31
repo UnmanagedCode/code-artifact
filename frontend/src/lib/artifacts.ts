@@ -1,5 +1,22 @@
 // Pure UI logic: no imports, so Node imports this file directly in tests.
 
+export type AppState = 'stopped' | 'installing' | 'starting' | 'running' | 'failed';
+
+/** A live process state, as the backend reports it on an app record. */
+export interface AppStatus {
+  status: AppState;
+  version: number | null;
+  error: string | null;
+  since: string;
+}
+
+/** The artifact.json an app version was published with. */
+export interface AppManifest {
+  start: string;
+  install?: string;
+  prefix: 'strip' | 'keep';
+}
+
 export interface VersionRec {
   n: number;
   title: string;
@@ -10,6 +27,7 @@ export interface VersionRec {
   file?: string;
   bytes: number;
   files: number;
+  app?: AppManifest;
   versionLink: string;
 }
 
@@ -21,6 +39,7 @@ export interface ArtifactRec {
   createdAt: string;
   versions: VersionRec[];
   link: string;
+  app?: AppStatus;
 }
 
 export type Route = { view: 'list' } | { view: 'detail'; id: string };
@@ -77,3 +96,16 @@ export function relativeTime(iso: string, now: number = Date.now()): string {
   const n = Math.floor(s / best[0]);
   return `${n} ${best[1]}${n === 1 ? '' : 's'} ago`;
 }
+
+/** Which process controls apply: Start from stopped or failed, Stop while installing, starting or running. */
+export function appActions(status: AppState): { start: boolean; stop: boolean } {
+  return { start: status === 'stopped' || status === 'failed', stop: status === 'installing' || status === 'starting' || status === 'running' };
+}
+
+/** A state that changes by itself soon, so the status is polled fast. */
+export const isTransient = (status: AppState): boolean => status === 'installing' || status === 'starting';
+
+const STATUS_LABELS: Record<AppState, string> = {
+  stopped: 'Stopped', installing: 'Installing…', starting: 'Starting…', running: 'Running', failed: 'Failed',
+};
+export const statusLabel = (status: AppState): string => STATUS_LABELS[status];

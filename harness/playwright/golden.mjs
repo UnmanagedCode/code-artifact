@@ -21,7 +21,7 @@ function watchErrors(page) {
   page.on('console', (m) => {
     if (m.type() === 'error' && !HOST_URLS.test(m.text()) && !/^Failed to load resource/.test(m.text())) failures.push(m.text());
   });
-  page.on('response', (r) => { if (r.status() >= 400 && !HOST_URLS.test(r.url())) failures.push(`${r.status()} ${r.url()}`); });
+  page.on('response', (r) => { if (r.status() >= 400 && !HOST_URLS.test(r.url()) && !(r.status() === 409 && /\/stop$/.test(r.url()))) failures.push(`${r.status()} ${r.url()}`); });
   page.on('pageerror', (e) => failures.push(`pageerror: ${e.message}`));
 }
 
@@ -30,6 +30,16 @@ const VIEWS = [
   { name: 'phone', viewport: { width: 390, height: 844 } },
 ];
 const SCHEMES = ['light', 'dark'];
+
+const post = (url) => fetch(`${world.url}/${url}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+const stopApps = () => Promise.all([world.ids.app, world.ids.failing].map((id) => post(`api/apps/${id}/stop`)));
+async function waitFailed(id) {
+  for (let i = 0; i < 100; i++) {
+    if ((await (await fetch(`${world.url}/api/apps/${id}`)).json()).status === 'failed') return;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  throw new Error(`${id} never failed`);
+}
 
 try {
   for (const { name: vname, viewport } of VIEWS) {
@@ -48,8 +58,27 @@ try {
         await page.getByRole('heading', { name: 'Artifacts', level: 1 }).waitFor();
         await page.getByRole('link', { name: 'Release notes' }).waitFor();
         assert.deepEqual(await page.locator('section[aria-label] > h2').allTextContents(), ['demo', 'tools']);
-        assert.equal(await page.getByRole('link', { name: 'Open' }).count(), 3);
+        assert.equal(await page.getByRole('link', { name: 'Open' }).count(), 5);
+        assert.equal(await page.getByText('Stopped', { exact: true }).count(), 2, 'both app rows show a status badge');
         await shot('list');
+
+        // App detail: status, Start/Stop, the manifest and the (empty) log.
+        await stopApps();
+        await page.goto(`${world.url}/?artifact=${world.ids.app}`);
+        await page.getByRole('heading', { name: 'Demo app', level: 1 }).waitFor();
+        assert.ok(await page.getByRole('button', { name: 'Start' }).isEnabled());
+        assert.ok(await page.getByRole('button', { name: 'Stop' }).isDisabled());
+        await page.getByText('node server.js', { exact: true }).waitFor();
+        await shot('detail-app');
+        await page.getByRole('button', { name: 'Start' }).click();
+        await page.getByText('Running', { exact: true }).first().waitFor();
+        assert.ok(await page.getByRole('button', { name: 'Stop' }).isEnabled());
+        await page.locator('pre[aria-label="App log"]').filter({ hasText: 'demo app listening' }).waitFor();
+        await shot('detail-app-running');
+        await stopApps();
+
+        await page.goto(world.url);
+        await page.getByRole('link', { name: 'Release notes' }).waitFor();
 
         // Detail of the two-version markdown artifact.
         await page.getByRole('link', { name: 'Release notes' }).click();
@@ -100,6 +129,34 @@ try {
         assert.ok(Math.abs(frameBox.width - viewport.width) < 2, 'the iframe spans the width');
         assert.match(await page.locator('iframe.site').getAttribute('src'), /^\.\.\/\.\.\/raw\//);
         await shot('page-static');
+        // App wrapper: stopped panel, Start, the running frame, then a failed app with its log tail.
+        await stopApps();
+        await page.goto(`${world.url}/a/${world.ids.app}/`);
+        await page.locator('.app-panel [data-role="start"]').waitFor();
+        assert.equal(await page.locator('iframe.site').count(), 0);
+        await shot('page-app-stopped');
+        await page.locator('.app-panel [data-role="start"]').click();
+        await page.frameLocator('iframe.site').getByRole('heading', { name: 'App says hi' }).waitFor();
+        assert.equal(await page.locator('.badge.status').textContent(), 'running');
+        assert.ok(Math.abs((await page.locator('iframe.site').boundingBox()).height + (await page.locator('.bar').boundingBox()).height - viewport.height) < 2, 'the frame fills the viewport');
+        await shot('page-app-running');
+        // A refused Stop while running shows in the bar and leaves the frame up.
+        await page.route('**/api/apps/*/stop', (route) => route.fulfill({ status: 409, contentType: 'application/json', body: '{"error":"stop refused: demo","code":"X"}' }));
+        await page.locator('[data-role="toggle"]').click();
+        await page.locator('[data-role="action-error"]', { hasText: 'stop refused: demo' }).waitFor();
+        assert.equal(await page.locator('iframe.site').count(), 1, 'the app is still framed');
+        await shot('page-app-action-error');
+        await page.unroute('**/api/apps/*/stop');
+        await page.locator('[data-role="toggle"]').click();
+        await page.locator('.app-panel').waitFor();
+        await page.locator('.badge.status', { hasText: 'stopped' }).waitFor();
+        await post(`api/apps/${world.ids.failing}/start`);
+        await waitFailed(world.ids.failing);
+        await page.goto(`${world.url}/a/${world.ids.failing}/`);
+        await page.locator('.app-error', { hasText: /exited with code 4/ }).waitFor();
+        await page.locator('pre.log', { hasText: 'boom: cannot bind' }).waitFor();
+        await shot('page-app-failed');
+        await post(`api/apps/${world.ids.failing}/stop`);
         await page.goto(`${world.url}/a/${world.ids.static}/v/1/`);
         await page.frameLocator('iframe.site').getByRole('heading', { name: 'Demo site' }).waitFor();
         await shot('page-static-pinned');

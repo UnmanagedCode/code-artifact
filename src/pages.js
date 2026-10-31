@@ -73,3 +73,66 @@ export function staticPage({ prefix, id, version, latest, frameSrc }) {
 </html>
 `;
 }
+
+const STATE_TEXT = {
+  stopped: 'This app is stopped.',
+  installing: 'Installing dependencies…',
+  starting: 'Starting…',
+  failed: 'The app failed.',
+};
+
+/**
+ * The wrapper for an app: a bar with live status and Start/Stop over an iframe (`frameSrc`, the proxied app) while it runs,
+ * else a panel with Start and the log tail. `state` is the host's status for the artifact; `latestN` is the version that runs.
+ * A version other than the latest never runs: it gets a notice and a link to the latest.
+ */
+export function appPage({ prefix, id, version, latest, latestN, state, frameSrc }) {
+  const runs = version.n === latestN;
+  const title = escapeHtml(version.title);
+  const badge = `<span class="badge">v${version.n} · ${latest ? 'latest' : 'pinned'}</span>`;
+  const links = `<a class="btn" href="${prefix}?artifact=${id}">Logs</a>
+<a class="btn" href="${downloadLink(prefix, id, version.n)}">Download</a>`;
+  if (!runs) {
+    return `${head(prefix, version.title)}<body class="wrap app">
+<header class="bar">
+<h1>${title}</h1>
+${badge}
+${links}
+</header>
+<div class="stage">
+<section class="app-panel">
+<p class="app-state">v${version.n} does not run; only the latest (v${latestN}) runs.</p>
+<p><a class="btn primary" href="${prefix}a/${id}/">Open latest</a></p>
+</section>
+</div>
+</body>
+</html>
+`;
+  }
+  const running = state.status === 'running';
+  const active = ['installing', 'starting', 'running'].includes(state.status);
+  const stage = running
+    ? `<iframe class="site" title="${title}" src="${escapeHtml(frameSrc)}"></iframe>`
+    : `<section class="app-panel">
+<p class="app-state" data-role="state-text">${STATE_TEXT[state.status] ?? ''}</p>
+<p class="app-error" data-role="error"${state.error ? '' : ' hidden'}>${escapeHtml(state.error ?? '')}</p>
+<p><button type="button" class="btn primary" data-role="start"${active ? ' hidden' : ''}>Start</button></p>
+<pre class="log" data-role="log" aria-label="App log"></pre>
+</section>`;
+  return `${head(prefix, version.title)}<body class="wrap app" data-api="${prefix}api/apps/${id}" data-frame-src="${escapeHtml(frameSrc)}" data-title="${title}" data-status="${state.status}">
+<header class="bar">
+<h1>${title}</h1>
+${badge}
+<span class="badge status" data-role="status" data-tone="${state.status}">${state.status}</span>
+<button type="button" class="btn" data-role="toggle">${active ? 'Stop' : 'Start'}</button>
+${links}
+</header>
+<p class="bar-error" data-role="action-error" role="alert" hidden></p>
+<div class="stage" data-role="stage">
+${stage}
+</div>
+<script src="${prefix}_page/app-page.js" defer></script>
+</body>
+</html>
+`;
+}

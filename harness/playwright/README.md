@@ -22,8 +22,8 @@ Screenshots land in `harness/playwright/out/` (gitignored) as `<step>-<desktop|p
 | File | Role |
 |---|---|
 | `resolve.mjs` | Resolves the shared harness from `$CC_PROJECTS_ROOT` |
-| `seed.mjs` | `bootServer` on a sandboxed `CODE_ARTIFACT_STORE`; publishes a markdown artifact (two versions, the first backdated), a static site and a download over MCP |
-| `golden.mjs` | List, detail, confirm dialog, prune dialog and the markdown, download and static pages, in light and dark at desktop and phone width; asserts the key states and fails on a console error or a failed request (the two host URLs excepted) |
+| `seed.mjs` | `bootServer` on a sandboxed `CODE_ARTIFACT_STORE`; publishes a markdown artifact (two versions, the first backdated), a static site, a download and two apps (one that runs, one that fails) over MCP |
+| `golden.mjs` | List, detail, app detail, confirm dialog, prune dialog and the markdown, download, static and app pages (stopped, Start, running frame, failed with log), in light and dark at desktop and phone width; asserts the key states and fails on a console error or a failed request (the two host URLs excepted) |
 
 ## Notes
 

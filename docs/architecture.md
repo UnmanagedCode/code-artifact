@@ -6,14 +6,20 @@ Node ESM backend (Express 4) plus a React/Vite/Tailwind v4 UI, one package. Cont
 
 | Module | Responsibility |
 |---|---|
-| `server.js` | `createServer({storeDir, distDir, ccUrl, limits})` wires the pieces; `start()` listens on `127.0.0.1:$PORT` (default 7500) and prints the `readyWhen` line |
+| `server.js` | `createServer({storeDir, distDir, ccUrl, limits, mount, appTimings})` wires the pieces and reaps orphans; `start()` listens on `127.0.0.1:$PORT` (default 7500), prints the `readyWhen` line and stops every app on SIGTERM/SIGINT |
 | `src/config.js` | `storeRoot()` (`CODE_ARTIFACT_STORE`, else `$PROJECTS_ROOT/.code-artifact`), `ccUrl()` (`CONDUCTOR_URL`) |
 | `src/refusal.js` | `Refusal` and `CODES` (code → REST status) |
 | `src/limits.js` | `LIMITS`: byte, file-count and markdown-size caps; injectable in tests |
-| `src/links.js` | `PLUGIN_ID`, `ID_RE`, `deepLink` |
+| `src/links.js` | `PLUGIN_ID`, `MOUNT`, `appBasePath`, `ID_RE`, `deepLink` |
 | `src/kinds.js` | `KINDS`, `resolveKind(info, explicit)` |
 | `src/source.js` | `inspectSource`: stat, directory listing, tarball listing and validation |
 | `src/ingest.js` | `stageContent`: walk, copy, extract, pack into a staging dir |
+| `src/appManifest.js` | `parseAppManifest`, `readAppManifest`: the `artifact.json` schema |
+| `src/appHost.js` | `createAppHost`: per-artifact process state machine, per-id lock, timers, `APP_TIMINGS` |
+| `src/appProcs.js` | OS layer: process groups, `/proc` scans, zombie-aware liveness, port probe |
+| `src/appLog.js` | Log file open/rotate/tail |
+| `src/appRewrite.js` | Pure proxy rewriting: upstream path, forwarded headers, `Location`, `Set-Cookie` |
+| `src/appProxy.js` | `appProxyRouter` (HTTP) and `appUpgrade` (WebSocket) for `app/<id>/…` |
 | `src/markdown.js` | `renderMarkdown`: `marked` (GFM) then `sanitize-html` allowlist |
 | `src/store.js` | `Store`: on-disk records, versions, mutex, sweep, prune |
 | `src/cc.js` | cc REST reads: project existence, session label |
@@ -21,10 +27,11 @@ Node ESM backend (Express 4) plus a React/Vite/Tailwind v4 UI, one package. Cont
 | `src/mcp.js` | Tool handlers keyed by manifest tool name; the envelope handler |
 | `src/api.js` | REST router for the UI |
 | `src/serve.js` | `a/…`, `raw/…`, `dl/…`, `_page/…` |
-| `src/pages.js` | Markdown page, download landing page and the static wrapper (`staticPage`) templates |
+| `src/pages.js` | Markdown page, download landing page and the static and app wrapper (`staticPage`, `appPage`) templates |
 | `src/webui.js` | Security headers, JSON-only mutation gate, UI mount, terminal handlers |
 | `src/http.js` | `wrap` (async handler errors), `refusalJson`, `plain` |
 | `assets/page.css` | Styles of the server-rendered pages (tokens only) |
+| `assets/app-page.js` | The app wrapper's behaviour: status polling, Start/Stop, log tail, iframe swap |
 | `frontend/` | The UI, per the plugin UI reference setup; `frontend/src/lib/artifacts.ts` holds the pure logic |
 
 ## Store on disk
@@ -33,11 +40,15 @@ Node ESM backend (Express 4) plus a React/Vite/Tailwind v4 UI, one package. Cont
 <store>/artifacts/<id>/artifact.json
 <store>/artifacts/<id>/v/<n>/content/…       served root (the single file, or the site tree)
 <store>/artifacts/<id>/v/<n>/rendered.html   markdown only
+<store>/artifacts/<id>/v/<n>/run/            app only: the working copy a run executes in (created at first Start)
+<store>/artifacts/<id>/v/<n>/installed       app only: marker of a finished install
+<store>/artifacts/<id>/data/                 app only: DATA_DIR
+<store>/artifacts/<id>/app.log[.1]           app only: the current and previous run's log
 <store>/.staging/<rand>/                     ingest scratch
 <store>/.trash/<rand>/                       artifact dirs on their way out
 ```
 
-`artifact.json`: `schema`, `id`, `kind`, `project`, `title` (current), `createdAt`, `nextVersion`, `versions[]`. A record is validated on every read (`recordProblem` in `src/store.js`); a malformed or unparseable one is logged, left on disk, and excluded from `get`, `list` and `prune`. A version: `n`, `title`, `publishedAt`, `sessionId`, `sessionLabel`, `source:{name,type}`, `file` (markdown/download), `bytes`, `files`.
+`artifact.json`: `schema`, `id`, `kind`, `project`, `title` (current), `createdAt`, `nextVersion`, `versions[]`. A record is validated on every read (`recordProblem` in `src/store.js`); a malformed or unparseable one is logged, left on disk, and excluded from `get`, `list` and `prune`. A version: `n`, `title`, `publishedAt`, `sessionId`, `sessionLabel`, `source:{name,type}`, `file` (markdown/download), `app:{start, install?, prefix}` (app; `recordProblem` requires it), `bytes`, `files`.
 
 - **Ids**: a slug of the title plus a random suffix; see `newId` in `src/store.js`. Every id matches `ID_RE`.
 - **Version numbers** come from `nextVersion` and are never reused. Latest is the last remaining entry (the highest `n`).
@@ -66,6 +77,21 @@ Node ESM backend (Express 4) plus a React/Vite/Tailwind v4 UI, one package. Cont
 - cc steers a page it already shows with `navigate` (a `replaceState` plus a synthetic `popstate`, never a load). `frontend/public/nav.js`, loaded by the UI document and by every server-rendered page, reloads when the path changes under the document, and, on a server-rendered page (its `<html>` carries `data-reload-on-search`), when the query changes too; the UI's own query routing and hash-only changes never reload. Without it, opening an artifact from the UI, or a second artifact link while the plugin is docked, would leave stale content.
 - Markdown is rendered once at publish and read from `rendered.html`, so serving never parses.
 
+## App processes
+
+- **One process per artifact, always the latest version.** Invariant: an active process runs the version that was latest when it started, and every update restarts an active app. State is in memory; every boot starts all apps `stopped`. Each Start makes a new run object, and a run's callbacks (install exit, probe, child exit) act only while it is still the current one.
+- **Per-id lock** (`locked` in `appHost.js`): Start, Stop, `committing` (an update's store write plus the restart of an active app) and `exclusive` (delete) queue per artifact, so a version delete cannot interleave with an update's commit. Lock order: the host lock is always taken before the store's mutex, never the reverse.
+- **Install into a copy.** Start copies `v/<n>/content/` to `v/<n>/run/` (`fsp.cp` with `COPYFILE_FICLONE`) and installs there; success writes `v/<n>/installed`. No marker (or no `run/`) means `rm -rf run/`, copy, install again. The published `content/` is never touched, so `dl/` stays the published tree.
+- **Process groups.** `install` and `start` run as `/bin/sh -c` with `detached: true`; Stop is `SIGTERM` to the group, then `SIGKILL` after `graceMs`. Anything that left the group is caught by the marker sweep.
+- **Run marker.** Every install and start process gets `CODE_ARTIFACT_RUN=<id>@<realpath of the store root>`. `reapMarked` scans `/proc/*/environ` (same uid; unreadable entries skipped) for a marker whose part after the first `@` is this store's real path. No pid files: *selection* is marker-based, so a pid that was recycled before the scan has no marker and is never selected (a pid recycled between selection and the signal could still be hit; there is no pidfd), descendants that left the group still carry it, and another store's apps (the live plugin's, a test's) never match. Without `/proc` the group kill still works; the sweep and boot reaping are skipped with one logged warning.
+- **Liveness is read from `/proc/<pid>/stat`**: a zombie does not count as alive (`kill(pid, 0)` succeeds on one, and a container's PID 1 may never reap). A group is alive while any non-zombie has that `pgrp`.
+- **Logs are files, never pipes**: stdout and stderr of a run share one `O_APPEND` fd on `app.log`. Each Start renames it to `app.log.1`; a timer (`logCheckMs`) rotates a running log above `logCapBytes`, keeping its tail in `.1`. A check that finds the log grew while it read the tail skips that round (the tail could be partial) but at most once in a row, so an app that writes continuously is still rotated (`createRotator` in `src/appLog.js`).
+- **Shutdown vs cc's 3 s grace.** cc stops a plugin with SIGTERM and SIGKILLs the group 3 s later. `start()` handles SIGTERM/SIGINT with `apps.shutdown()` and exits 0. `shutdown()` sets `closed`, then SIGTERMs every group in parallel and SIGKILLs the survivors after `shutdownGraceMs` (2 s), waits up to 1 s for a SIGKILLed group to vanish, then sweeps by marker for descendants that left their group (SIGKILL at once, up to 1 s more). `halt` kills each group once; a launch that is not stopping also kills what its install left behind. The worst case is therefore `shutdownGraceMs` + 1 s + 1 s, about 4 s, and only when a process is stuck uninterruptibly (an in-progress content copy, `fsp.cp` into `run/`, is not bounded by these timings: shutdown waits for it to notice the stop); one that dies on SIGTERM or SIGKILL takes milliseconds. After `shutdown()` resolves nothing is spawned or running: `startLocked` re-checks `closed` in the same synchronous step as `states.set`, so a Start is either in `shutdown()`'s snapshot or refused. cc's restart of the *backend* does not adopt anything: apps are stopped, never adopted, so no ports or liveness need persisting.
+- **`BASE_PATH` is `MOUNT/app/<id>`, a constant** (`createServer({mount})` is a test seam). Two start paths carry no forwarded prefix at all: the restart triggered by an `update_artifact` MCP call, and a WebSocket upgrade.
+- **Ports and readiness**: `freePort()` listens on 0 and closes; `probe(port)` connects to `127.0.0.1` and `::1` and the answering address is where the proxy connects. Known limitation: another process can take the port between `freePort()` and the app's bind, and `probe` accepts any listener on the port, so the app could be reported `running` while something else answers. There is no retry.
+
 ## Tests
+
+App tests start real child processes from a dependency-free fixture app (`tests/fixtures/app-server.cjs`, options in its `fixture.json`) on ephemeral ports. `tests/_apps.mjs` holds the helpers: `startApps` injects short `appTimings` (`TIMINGS`), every wait is `waitFor` against a deadline, and `startApp`'s teardown awaits `server.apps.shutdown()` before the store is removed. `app-reap.test.mjs` also spawns `node server.js` to pin the SIGTERM path.
 
 `npm test` runs `tests/run.mjs`, a programmatic `node:test` runner. Each test builds its own temp store and starts the app on port 0 (`startApp` in `tests/_helpers.mjs`); a fake cc (`fakeCc`) stands in for the conductor and `rawTarball` builds hostile archives. Pure UI logic is tested by importing `frontend/src/lib/artifacts.ts` directly. `npm run typecheck` checks the UI.

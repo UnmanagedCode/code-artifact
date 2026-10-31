@@ -36,3 +36,10 @@ test('the id format excludes dot segments, slashes and uppercase', () => {
   for (const bad of ['.', '..', 'a/b', 'A', '-a', 'a.b', '', 'x'.repeat(49)]) assert.doesNotMatch(bad, ID_RE, bad);
   for (const ok of ['a', '0', 'a-b-c', 'x'.repeat(48)]) assert.match(ok, ID_RE, ok);
 });
+
+test('appBasePath is the cc mount plus app/<id>, with no trailing slash', async () => {
+  const { appBasePath, MOUNT } = await import('../src/links.js');
+  assert.equal(MOUNT, '/plugins/code-artifact');
+  assert.equal(appBasePath('a1'), '/plugins/code-artifact/app/a1');
+  assert.equal(appBasePath('a1', '/m'), '/m/app/a1');
+});

@@ -4,6 +4,7 @@ import path from 'node:path';
 import { Refusal } from './refusal.js';
 import { ID_RE } from './links.js';
 import { KINDS } from './kinds.js';
+import { PREFIX_MODES } from './appManifest.js';
 
 const SCHEMA = 1;
 const isVersionNumber = (n) => Number.isInteger(n) && n >= 1;
@@ -27,6 +28,11 @@ function recordProblem(r, id) {
     if (v === null || typeof v !== 'object' || !isVersionNumber(v.n)) return 'a version number is not a positive integer';
     if (v.n <= prev) return 'version numbers are not ascending';
     if (typeof v.title !== 'string' || typeof v.publishedAt !== 'string' || Number.isNaN(Date.parse(v.publishedAt))) return 'a version has no valid title or publishedAt';
+    if (r.kind === 'app') {
+      const a = v.app;
+      if (a === null || typeof a !== 'object' || typeof a.start !== 'string' || !PREFIX_MODES.includes(a.prefix)
+        || (a.install !== undefined && typeof a.install !== 'string')) return 'an app version has no valid app manifest';
+    }
     prev = v.n;
   }
   if (!isVersionNumber(r.nextVersion) || r.nextVersion <= prev) return 'nextVersion does not follow the versions';
@@ -63,6 +69,18 @@ export class Store {
   versionDir = (id, n) => {
     if (!ID_RE.test(id) || !isVersionNumber(n)) throw new Error(`invalid artifact or version: ${id} v${n}`);
     return path.join(this.#artifactDir(id), 'v', String(n));
+  };
+
+  /** The working copy an app runs from (created at first Start, never part of the published tree). */
+  runDir = (id, n) => path.join(this.versionDir(id, n), 'run');
+  /** Present once `runDir`'s install succeeded. */
+  installedMarker = (id, n) => path.join(this.versionDir(id, n), 'installed');
+  /** An app's persistent state: survives updates, removed with the artifact. */
+  dataDir = (id) => this.#artifactFile(id, 'data');
+  logFile = (id) => this.#artifactFile(id, 'app.log');
+  #artifactFile = (id, name) => {
+    if (!ID_RE.test(id)) throw new Error(`invalid artifact: ${id}`);
+    return path.join(this.#artifactDir(id), name);
   };
 
   #lock(fn) {
@@ -217,14 +235,14 @@ export class Store {
 
   /**
    * Versions published more than `olderThanDays` days ago, never an artifact's latest.
-   * `dryRun` only reports. Resolves to `{versions: [{id, version}], artifacts}`.
+   * `keep(id, n)` returning true spares a version. `dryRun` only reports. Resolves to `{versions: [{id, version}], artifacts}`.
    */
-  prune({ olderThanDays, project, dryRun = false }) {
+  prune({ olderThanDays, project, dryRun = false, keep = () => false }) {
     return this.#lock(async () => {
       const cutoff = new Date(this.now().getTime() - olderThanDays * 86_400_000).toISOString();
       const picked = [];
       for (const r of await this.list({ project })) {
-        for (const v of r.versions.slice(0, -1)) if (v.publishedAt < cutoff) picked.push({ id: r.id, version: v.n });
+        for (const v of r.versions.slice(0, -1)) if (v.publishedAt < cutoff && !keep(r.id, v.n)) picked.push({ id: r.id, version: v.n });
       }
       if (!dryRun) for (const { id, version } of picked) await this.#deleteVersion(id, version);
       return { versions: picked, artifacts: new Set(picked.map((p) => p.id)).size };

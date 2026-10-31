@@ -1,4 +1,4 @@
-// Boots the backend on a sandboxed store and publishes one artifact of each supported kind over MCP,
+// Boots the backend on a sandboxed store and publishes one artifact of each kind (two apps: one that runs, one that fails) over MCP,
 // plus a second markdown version, then backdates the first so the prune dialog has something to count.
 import fs from 'node:fs';
 import os from 'node:os';
@@ -36,6 +36,14 @@ export async function seed() {
   fs.mkdirSync(path.join(files, 'site'));
   fs.writeFileSync(path.join(files, 'site', 'index.html'), '<!doctype html><title>Demo</title><h1>Demo site</h1><p>Served as authored.</p>');
   fs.writeFileSync(path.join(files, 'report.csv'), 'a,b\n1,2\n');
+  for (const [name, server, manifest] of [
+    ['app', "require('node:http').createServer((q, r) => { r.setHeader('content-type', 'text/html'); r.end('<!doctype html><h1>App says hi</h1><p>served by a running process</p>'); }).listen(process.env.PORT, '127.0.0.1', () => console.log('demo app listening'));", { start: 'node server.js' }],
+    ['failing', "console.error('boom: cannot bind'); process.exit(4);", { start: 'node server.js' }],
+  ]) {
+    fs.mkdirSync(path.join(files, name));
+    fs.writeFileSync(path.join(files, name, 'server.js'), server);
+    fs.writeFileSync(path.join(files, name, 'artifact.json'), JSON.stringify(manifest));
+  }
 
   const srv = await bootServer({
     cwd: ROOT, entry: 'server.js',
@@ -54,6 +62,8 @@ export async function seed() {
   const md = await mcp('publish_artifact', { path: path.join(files, 'notes.md'), title: 'Release notes' });
   await mcp('update_artifact', { artifact: md.id, path: path.join(files, 'notes-v2.md') });
   const site = await mcp('publish_artifact', { path: path.join(files, 'site'), title: 'Demo site' }, 'tools');
+  const app = await mcp('publish_artifact', { path: path.join(files, 'app'), title: 'Demo app' });
+  const failing = await mcp('publish_artifact', { path: path.join(files, 'failing'), title: 'Broken app' });
   const dl = await mcp('publish_artifact', { path: path.join(files, 'report.csv'), title: 'Quarterly report' });
 
   // Backdate version 1 of the markdown artifact (the server reads artifact.json per request).
@@ -64,7 +74,7 @@ export async function seed() {
 
   return {
     url: srv.url,
-    ids: { markdown: md.id, static: site.id, download: dl.id },
+    ids: { markdown: md.id, static: site.id, download: dl.id, app: app.id, failing: failing.id },
     close: async () => { await srv.close(); fs.rmSync(files, { recursive: true, force: true }); },
   };
 }

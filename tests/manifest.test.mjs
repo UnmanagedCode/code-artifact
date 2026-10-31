@@ -48,3 +48,17 @@ test('the declared healthPath and mcp endpoint exist on the server', async (t) =
   assert.equal(res.status, 200);
   assert.ok(manifest.mcp.timeoutMs <= 120000);
 });
+
+test('the tool set carries no process lifecycle: Start, Stop and logs are the UI\'s', () => {
+  assert.deepEqual(
+    manifest.mcp.tools.map((t) => t.name).sort(),
+    ['delete_artifact', 'get_artifact', 'list_artifacts', 'publish_artifact', 'update_artifact'],
+  );
+});
+
+test('the kind descriptions do not call app unsupported, and publish explains the artifact.json source', () => {
+  const text = JSON.stringify(manifest);
+  assert.doesNotMatch(text, /not supported yet/);
+  const publish = manifest.mcp.tools.find((t) => t.name === 'publish_artifact');
+  assert.match(publish.description, /artifact\.json/);
+});

@@ -11,13 +11,13 @@
     "tools": [
       {
         "name": "publish_artifact",
-        "description": "Publish a file or directory as a new immutable, versioned artifact and get a link the user can open in cc. The kind is inferred from the source: a .md file is markdown; a .html file, or a directory/.tar.gz with a root index.html, is a static site; anything else is a downloadable file. Pass project when called from the conductor (its own project is not a user project).",
+        "description": "Publish a file or directory as a new immutable, versioned artifact and get a link the user can open in cc. The kind is inferred from the source: a .md file is markdown; a .html file, or a directory/.tar.gz with a root index.html, is a static site; a directory/.tar.gz with a root artifact.json ({start, install?, prefix?}) is an app that code-artifact runs for the user: it is published stopped and the user starts it from the link, so publish the source without node_modules; anything else is a downloadable file. Pass project when called from the conductor (its own project is not a user project).",
         "inputSchema": {
           "type": "object",
           "properties": {
             "path": { "type": "string", "minLength": 1, "maxLength": 4096, "description": "Absolute path of the file, directory or .tar.gz to publish." },
             "title": { "type": "string", "minLength": 1, "maxLength": 200, "description": "Human title shown in the artifact list." },
-            "kind": { "type": "string", "enum": ["markdown", "static", "download", "app"], "description": "Override the inferred kind. \"app\" is not supported yet; use \"static\"." },
+            "kind": { "type": "string", "enum": ["markdown", "static", "download", "app"], "description": "Override the inferred kind; the source must fit it (app needs a root artifact.json)." },
             "project": { "type": "string", "pattern": "^[a-zA-Z0-9._-]+$", "maxLength": 100, "description": "Owning project. Defaults to the calling session's project; required from the conductor." },
             "sessionId": { "type": "string", "minLength": 1, "maxLength": 200, "description": "Publishing session. Defaults to the calling session." }
           },

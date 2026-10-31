@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import * as tar from 'tar';
 import { ID_RE } from './links.js';
 import { CONTENT, RENDERED } from './ingest.js';
-import { markdownPage, downloadPage, staticPage } from './pages.js';
+import { markdownPage, downloadPage, staticPage, appPage } from './pages.js';
 import { plain, wrap } from './http.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -15,6 +15,7 @@ const PAGE_ASSETS = {
   'fallback.css': [path.join(ROOT, 'frontend', 'src'), 'cc-theme-fallback.css'],
   'theme-init.js': [path.join(ROOT, 'frontend', 'public'), 'theme-init.js'],
   'nav.js': [path.join(ROOT, 'frontend', 'public'), 'nav.js'],
+  'app-page.js': [path.join(ROOT, 'assets'), 'app-page.js'],
 };
 const PINNED_CACHE = 'private, max-age=31536000, immutable';
 
@@ -72,8 +73,17 @@ async function serveStatic(res, next, content, sub) {
   });
 }
 
-/** The routes that serve published content: a/…, dl/…, and the page assets. */
-export function contentRouter(getStore) {
+/** False for a sub-path that could climb out of the app's URL space: a `..` segment (also percent-encoded) or a backslash. */
+function appSubOk(sub) {
+  return sub.split('/').every((part) => {
+    let seg;
+    try { seg = decodeURIComponent(part); } catch { return false; }
+    return seg !== '..' && !seg.includes('\\');
+  });
+}
+
+/** The routes that serve published content: a/…, raw/…, dl/…, and the page assets. `apps` is the app host. */
+export function contentRouter(getStore, apps) {
   const r = express.Router();
 
   r.get('/_page/:file', (req, res, next) => {
@@ -109,6 +119,16 @@ export function contentRouter(getStore) {
       const search = req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : '';
       return res.type('html').send(staticPage({ ...ctx, frameSrc: `${prefix}raw/${id}/${version.n}${sub}${search}` }));
     }
+    if (record.kind === 'app') {
+      // The page shows live status, so even a pinned one is never cached; the app itself is served at app/<id>/.
+      if (!appSubOk(sub)) return plain(res, 404, 'Not found');
+      res.set('Cache-Control', 'no-cache');
+      const search = req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : '';
+      const latestN = record.versions[record.versions.length - 1].n;
+      return res.type('html').send(appPage({
+        ...ctx, latestN, state: apps.status(id), frameSrc: `${prefix}app/${id}${sub}${search}`,
+      }));
+    }
     if (sub !== '/') return plain(res, 404, 'Not found');
     if (record.kind === 'markdown') {
       const rendered = await fsp.readFile(path.join(dir, RENDERED), 'utf8');
@@ -138,7 +158,7 @@ export function contentRouter(getStore) {
     const version = record?.versions.find((v) => v.n === Number(n));
     if (!version) return plain(res, 404, 'Not found');
     const content = path.join(store.versionDir(id, version.n), CONTENT);
-    if (record.kind === 'static') {
+    if (record.kind === 'static' || record.kind === 'app') {
       res.attachment(`${id}-v${version.n}.tar.gz`);
       res.type('application/gzip');
       const pack = tar.c({ gzip: true, portable: true, cwd: content }, ['.']);

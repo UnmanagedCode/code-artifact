@@ -6,6 +6,8 @@ import { storeRoot, ccUrl } from './src/config.js';
 import { Refusal } from './src/refusal.js';
 import { Store } from './src/store.js';
 import { createCc } from './src/cc.js';
+import { createAppHost } from './src/appHost.js';
+import { appProxyRouter, appUpgrade } from './src/appProxy.js';
 import { createOps } from './src/ops.js';
 import { createTools, handle } from './src/mcp.js';
 import { apiRouter } from './src/api.js';
@@ -14,27 +16,32 @@ import { DEFAULT_DIST, jsonOnlyMutations, mountUi, securityHeaders, terminalHand
 
 /**
  * Builds the backend, not yet listening. `storeDir` null means unconfigured: every store-backed route
- * answers 503 STORE_UNCONFIGURED while the UI and health stay up. `distDir` and `limits` are test seams.
+ * answers 503 STORE_UNCONFIGURED while the UI and health stay up. `distDir`, `limits`, `mount` and `appTimings` are test seams.
  */
-export async function createServer({ storeDir, distDir = DEFAULT_DIST, ccUrl: cc = null, limits } = {}) {
+export async function createServer({ storeDir, distDir = DEFAULT_DIST, ccUrl: cc = null, limits, mount, appTimings } = {}) {
   const store = storeDir ? await Store.open(storeDir) : null;
   const getStore = () => {
     if (!store) throw new Refusal('STORE_UNCONFIGURED', 'set CODE_ARTIFACT_STORE or PROJECTS_ROOT');
     return store;
   };
-  const ops = createOps({ store: getStore, cc: createCc(cc), limits });
+  const apps = createAppHost({ store: getStore, storeDir, mount, timings: appTimings });
+  await apps.reapOrphans();
+  const ops = createOps({ store: getStore, cc: createCc(cc), apps, limits });
 
   const app = express();
   app.disable('x-powered-by');
   app.use(securityHeaders);
+  app.use(appProxyRouter(apps)); // before the JSON gate: an app's own form posts pass
   app.use(jsonOnlyMutations);
   app.use('/api', apiRouter({ ops, tools: createTools(ops), handleMcp: handle }));
-  app.use(contentRouter(getStore));
+  app.use(contentRouter(getStore, apps));
   mountUi(app, distDir);
   terminalHandlers(app);
 
   const server = http.createServer(app);
   server.on('clientError', (_err, socket) => socket.end('HTTP/1.1 400 Bad Request\r\n\r\n'));
+  server.on('upgrade', appUpgrade(apps));
+  server.apps = apps;
   return server;
 }
 
@@ -51,6 +58,10 @@ export async function start({ port = Number(process.env.PORT) || 7500, host = '1
     server.listen(port, host, resolve);
   });
   console.log(`code-artifact listening on http://${host}:${server.address().port}`);
+  // cc stops a plugin with SIGTERM and kills it 3 s later: stop every app first.
+  const shutdown = () => { server.apps.shutdown().finally(() => process.exit(0)); };
+  process.once('SIGTERM', shutdown);
+  process.once('SIGINT', shutdown);
   return server;
 }
 

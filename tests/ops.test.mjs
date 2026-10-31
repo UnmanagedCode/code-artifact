@@ -6,11 +6,13 @@ import path from 'node:path';
 import { Store } from '../src/store.js';
 import { createCc } from '../src/cc.js';
 import { createOps } from '../src/ops.js';
+import { createAppHost } from '../src/appHost.js';
 import { deadUrl, fakeCc, fixtureDir, fixtureFile, tmp } from './_helpers.mjs';
 
 async function setup(t, { ccUrl = null, now } = {}) {
-  const store = await Store.open(path.join(await tmp(t), 'store'), { now });
-  const ops = createOps({ store, cc: createCc(ccUrl) });
+  const storeDir = path.join(await tmp(t), 'store');
+  const store = await Store.open(storeDir, { now });
+  const ops = createOps({ store, cc: createCc(ccUrl), apps: createAppHost({ store, storeDir }) });
   return { store, ops };
 }
 const caller = { sessionId: 'sess-1', project: 'proj-a' };

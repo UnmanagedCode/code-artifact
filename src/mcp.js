@@ -7,6 +7,7 @@ const summarize = (r) => {
     id: r.id, title: r.title, kind: r.kind, project: r.project, versions: r.versions.length,
     latest: { version: v.n, publishedAt: v.publishedAt, sessionId: v.sessionId, sessionLabel: v.sessionLabel },
     link: r.link,
+    ...(r.app ? { app: r.app } : {}),
   };
 };
 

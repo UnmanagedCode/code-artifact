@@ -74,7 +74,7 @@ async function listTarball(file, limits) {
 
 /**
  * Describes the source at `absPath`. A tarball is listed (and so validated) only when `explicitKind`
- * leaves its contents relevant: no explicit kind, or `static`.
+ * leaves its contents relevant: no explicit kind, `static` or `app`.
  */
 export async function inspectSource(absPath, explicitKind, limits = LIMITS) {
   if (typeof absPath !== 'string' || absPath.includes('\0')) throw new Refusal('INVALID_ARGUMENT', 'path must be a string');
@@ -94,7 +94,7 @@ export async function inspectSource(absPath, explicitKind, limits = LIMITS) {
   }
   if (!st.isFile()) throw new Refusal('UNSUPPORTED_SOURCE', `${absPath} is neither a regular file nor a directory`);
   if (!TAR_RE.test(name)) return { ...info, type: 'file' };
-  if (explicitKind !== undefined && explicitKind !== 'static') return { ...info, type: 'tar' };
+  if (explicitKind !== undefined && explicitKind !== 'static' && explicitKind !== 'app') return { ...info, type: 'tar' };
   const listing = await listTarball(absPath, limits);
   return { ...info, type: 'tar', rootEntries: listing.rootEntries, strip: listing.strip };
 }
