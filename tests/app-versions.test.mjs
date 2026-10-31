@@ -125,10 +125,11 @@ test('prune skips a version the host reports as active, and spares nothing other
 });
 
 test('an update cannot slip between a version delete\'s check and its unlink', async (t) => {
+  let host;
+  t.after(() => host?.shutdown()); // registered before tmp(), so it runs before the store is removed
   const storeDir = path.join(await tmp(t), 'store');
   const store = await Store.open(storeDir);
-  const host = createAppHost({ store, storeDir, timings: TIMINGS });
-  t.after(() => host.shutdown());
+  host = createAppHost({ store, storeDir, timings: TIMINGS });
 
   // The delete's first read of the record is held after it has read a one-version record.
   let gate = null;

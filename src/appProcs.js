@@ -16,36 +16,43 @@ export function spawnGroup(cmd, { cwd, env, logFd }) {
   return spawn('/bin/sh', ['-c', cmd], { cwd, env, detached: true, stdio: ['ignore', logFd, logFd] });
 }
 
-/** `{state, ppid, pgrp}` from /proc/<pid>/stat, or null when the process is gone. `comm` may hold spaces and parens. */
+/** `{state, ppid, pgrp}` from the text of a /proc/<pid>/stat. `comm` may hold spaces and parens. */
+export function parseStat(text) {
+  const rest = text.slice(text.lastIndexOf(')') + 2).split(' ');
+  return { state: rest[0], ppid: Number(rest[1]), pgrp: Number(rest[2]) };
+}
+
+/** `parseStat` of a live /proc/<pid>/stat, or null when the process is gone. */
 async function procStat(pid) {
   try {
-    const text = await fsp.readFile(`/proc/${pid}/stat`, 'utf8');
-    const rest = text.slice(text.lastIndexOf(')') + 2).split(' ');
-    return { state: rest[0], ppid: Number(rest[1]), pgrp: Number(rest[2]) };
+    return parseStat(await fsp.readFile(`/proc/${pid}/stat`, 'utf8'));
   } catch {
     return null;
   }
 }
 
+/** Dead means gone, a zombie (`Z`) or being reaped (`X`): both are finished, though a container's PID 1 may be slow to collect them. */
+export const isDead = (st) => st === null || st.state === 'Z' || st.state === 'X';
+
 const numericPids = async () => (await fsp.readdir('/proc')).filter((n) => /^[0-9]+$/.test(n)).map(Number);
 
-/** Alive means not gone and not a zombie: kill(pid, 0) succeeds on a zombie, and a container's PID 1 may never reap. */
+/** Alive means not dead (`isDead`): kill(pid, 0) succeeds on a zombie, and a container's PID 1 may never reap. */
 export async function pidAlive(pid) {
   if (!HAS_PROC) {
     try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; }
   }
   const st = await procStat(pid);
-  return st !== null && st.state !== 'Z';
+  return !isDead(st);
 }
 
-/** True while any non-zombie process is in group `pgid`. */
+/** True while any live process is in group `pgid`. */
 export async function groupAlive(pgid) {
   if (!HAS_PROC) {
     try { process.kill(-pgid, 0); return true; } catch (e) { return e.code === 'EPERM'; }
   }
   for (const pid of await numericPids()) {
     const st = await procStat(pid);
-    if (st && st.pgrp === pgid && st.state !== 'Z') return true;
+    if (st && st.pgrp === pgid && !isDead(st)) return true;
   }
   return false;
 }
@@ -87,31 +94,40 @@ export async function markedPids(storeReal, id) {
       const owner = value.slice(0, at);
       if (id !== undefined && owner !== id) break;
       const st = await procStat(pid);
-      if (st && st.state !== 'Z') found.push({ pid, id: owner, pgrp: st.pgrp });
+      if (!isDead(st)) found.push({ pid, id: owner, pgrp: st.pgrp });
       break;
     }
   }
   return found;
 }
 
-/** Kills every marked process: SIGTERM, SIGKILL after `graceMs`. Marked group leaders take their group with them. */
+/**
+ * Kills every marked process and resolves `{reaped, survivors}`: how many distinct pids were seen, and the pids still live at
+ * the deadline. Round one SIGTERMs, waiting `graceMs`; later rounds rescan and SIGKILL. It ends after two consecutive scans
+ * find nothing live, because a process that was alive at one scan can spawn marked children the scan never saw, and a
+ * SIGKILLed process cannot. Marked group leaders take their group with them. Worst case `graceMs` + 1 s.
+ */
 export async function reapMarked(storeReal, id, graceMs) {
-  const marked = await markedPids(storeReal, id);
-  if (marked.length === 0) return 0;
-  const leaders = new Set(marked.filter((m) => m.pgrp === m.pid).map((m) => m.pid));
-  const hit = (sig) => {
-    for (const m of marked) signal(leaders.has(m.pgrp) ? -m.pgrp : m.pid, sig);
-  };
-  hit('SIGTERM');
-  const allGone = async () => {
-    for (const m of marked) if (await pidAlive(m.pid)) return false;
-    return true;
-  };
-  if (!(await waitUntil(allGone, graceMs))) {
-    hit('SIGKILL');
-    await waitUntil(allGone, 1000);
+  const deadline = Date.now() + graceMs + 1000;
+  const seen = new Set();
+  let clean = 0;
+  let term = true;
+  while (clean < 2 && Date.now() < deadline) {
+    const marked = await markedPids(storeReal, id);
+    if (marked.length === 0) { clean++; continue; }
+    clean = 0;
+    for (const m of marked) seen.add(m.pid);
+    const leaders = new Set(marked.filter((m) => m.pgrp === m.pid).map((m) => m.pid));
+    for (const m of marked) signal(leaders.has(m.pgrp) ? -m.pgrp : m.pid, term ? 'SIGTERM' : 'SIGKILL');
+    const allGone = async () => {
+      for (const m of marked) if (await pidAlive(m.pid)) return false;
+      return true;
+    };
+    await waitUntil(allGone, term ? graceMs : Math.max(0, deadline - Date.now()));
+    term = false;
   }
-  return marked.length;
+  const survivors = clean >= 2 ? [] : (await markedPids(storeReal, id)).map((m) => m.pid);
+  return { reaped: seen.size, survivors };
 }
 
 /** A currently unused loopback port. */

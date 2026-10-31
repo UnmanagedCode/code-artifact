@@ -12,7 +12,7 @@ import { createCc } from '../src/cc.js';
 import { createOps } from '../src/ops.js';
 import { createAppHost } from '../src/appHost.js';
 import { tmp } from './_helpers.mjs';
-import { TIMINGS, appSource, markerPids, pidGone, publishApp, recordedPid, runApp, startApps, waitFor } from './_apps.mjs';
+import { TIMINGS, appSource, markerPids, pidGone, publishApp, recordedPid, reapStore, runApp, startApps, waitFor, waitStatus } from './_apps.mjs';
 
 test('a boot on the same store reaps what a crashed backend left behind', async (t) => {
   const a = await startApps(t);
@@ -52,17 +52,27 @@ test('shutdown() stops every running app and leaves nothing marked', async (t) =
 });
 
 test('SIGTERM to the backend stops its apps and exits 0', async (t) => {
-  const storeDir = path.join(await tmp(t), 'store');
+  let backend;
+  let exited;
+  let storeDir;
+  // Registered before tmp(), so it runs before the store is removed: the marker needs the store's path, and a backend
+  // killed here cannot stop its app itself.
+  t.after(async () => {
+    if (backend && backend.exitCode === null && backend.signalCode === null) backend.kill('SIGKILL');
+    await exited;
+    const real = storeDir && await fsp.realpath(storeDir).catch(() => null); // the dir still exists here
+    if (real) await reapStore(real);
+  });
+  storeDir = path.join(await tmp(t), 'store');
   const port = await freePort();
   const root = fileURLToPath(new URL('..', import.meta.url));
   const env = { ...process.env, CODE_ARTIFACT_STORE: storeDir, PORT: String(port) };
   delete env.CONDUCTOR_URL;
-  const backend = spawn(process.execPath, ['server.js'], { cwd: root, env, stdio: ['ignore', 'pipe', 'pipe'] });
+  backend = spawn(process.execPath, ['server.js'], { cwd: root, env, stdio: ['ignore', 'pipe', 'pipe'] });
   let output = '';
   backend.stdout.on('data', (d) => { output += d; });
   backend.stderr.on('data', (d) => { output += d; });
-  const exited = new Promise((resolve) => backend.once('exit', (code, sig) => resolve({ code, sig })));
-  t.after(() => { if (backend.exitCode === null && backend.signalCode === null) backend.kill('SIGKILL'); });
+  exited = new Promise((resolve) => backend.once('exit', (code, sig) => resolve({ code, sig })));
   const base = `http://127.0.0.1:${port}`;
   await waitFor(() => fetch(`${base}/api/health`).then((r) => r.ok, () => false), { what: `the backend to listen\n${output}` });
 
@@ -83,6 +93,8 @@ test('SIGTERM to the backend stops its apps and exits 0', async (t) => {
 });
 
 test('a Start in flight when shutdown() runs is refused and spawns nothing, even after every launch has settled', async (t) => {
+  let apps;
+  t.after(() => apps?.shutdown()); // registered before tmp(), so it runs before the store is removed
   const storeDir = path.join(await tmp(t), 'store');
   const store = await Store.open(storeDir);
   let gate = null;
@@ -102,8 +114,7 @@ test('a Start in flight when shutdown() runs is refused and spawns nothing, even
       return typeof value === 'function' ? value.bind(target) : value;
     },
   });
-  const apps = createAppHost({ store: gated, storeDir, timings: TIMINGS });
-  t.after(() => apps.shutdown());
+  apps = createAppHost({ store: gated, storeDir, timings: TIMINGS });
   const ops = createOps({ store, cc: createCc(null), apps });
   const pub = await ops.publish({ path: await appSource(t), title: 'x' }, { sessionId: 's', project: 'p' });
 
@@ -128,4 +139,47 @@ test('shutdown() also kills a descendant that left the process group', async (t)
   assert.ok(await pidAlive(escaped));
   await a.server.apps.shutdown();
   assert.equal(await pidAlive(escaped), false, 'gone by the time shutdown() resolves');
+  assert.deepEqual(await markerPids(a.storeDir), []);
+});
+
+test('shutdown() leaves nothing marked even when an escaped descendant keeps spawning more', async (t) => {
+  let real;
+  t.after(() => real && reapStore(real)); // registered before the store's removal, so it runs first
+  const a = await startApps(t);
+  real = await fsp.realpath(a.storeDir);
+  const pub = await publishApp(t, a);
+  await runApp(a, pub.id);
+  await fetch(`${a.base}/app/${pub.id}/escape-spawner`);
+  await waitFor(async () => (await markerPids(a.storeDir)).length >= 5, { what: 'the spawner to have spawned several descendants' });
+  await a.server.apps.shutdown();
+  assert.deepEqual(await markerPids(a.storeDir), [], 'nothing marked is alive once shutdown() resolves');
+});
+
+test('shutdown() kills an escaped descendant that ignores SIGTERM', async (t) => {
+  let real;
+  t.after(() => real && reapStore(real)); // registered before the store's removal, so it runs first
+  const a = await startApps(t);
+  real = await fsp.realpath(a.storeDir);
+  const pub = await publishApp(t, a);
+  await runApp(a, pub.id);
+  await fetch(`${a.base}/app/${pub.id}/escape-ignore-term`);
+  const ignorer = await recordedPid(a.storeDir, pub.id, 'ignorer.pid');
+  assert.ok(await pidAlive(ignorer));
+  await a.server.apps.shutdown();
+  assert.equal(await pidAlive(ignorer), false, 'SIGTERM alone would not have stopped it');
+  assert.deepEqual(await markerPids(a.storeDir), []);
+});
+
+test('an app that fails after leaving an escaped descendant has that descendant killed', async (t) => {
+  let real;
+  t.after(() => real && reapStore(real)); // registered before the store's removal, so it runs first
+  const a = await startApps(t);
+  real = await fsp.realpath(a.storeDir);
+  const pub = await publishApp(t, a);
+  await runApp(a, pub.id);
+  await fetch(`${a.base}/app/${pub.id}/escape-then-exit`);
+  const escaped = await recordedPid(a.storeDir, pub.id, 'escaped.pid');
+  await waitStatus(a, pub.id, 'failed');
+  await pidGone(escaped); // only the marker sweep in the failure's cleanup can reach it: it is outside the dead app's group
+  assert.deepEqual(await markerPids(a.storeDir), []);
 });

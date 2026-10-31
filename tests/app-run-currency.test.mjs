@@ -24,7 +24,7 @@ function fakeProcs() {
     },
     probe: async () => (fake.listening ? '127.0.0.1' : null),
     freePort: async () => ++port,
-    reapMarked: async () => 0,
+    reapMarked: async () => ({ reaped: 0, survivors: [] }),
   };
   return fake;
 }
