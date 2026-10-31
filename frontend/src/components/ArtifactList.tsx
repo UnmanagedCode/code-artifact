@@ -22,9 +22,9 @@ export function ArtifactList({ artifacts, project, embedded, onOpenDetail }: {
   }
   return (
     <div className="grid gap-6">
-      {groupByProject(artifacts).map(({ project, artifacts: rows }) => (
-        <section key={project} aria-label={project} className="grid min-w-0 gap-2">
-          <h2 className="text-sm font-medium text-muted-foreground">{project}</h2>
+      {groupByProject(artifacts).map(({ project: group, artifacts: rows }) => (
+        <section key={group} aria-label={group} className="grid min-w-0 gap-2">
+          <h2 className="text-sm font-medium text-muted-foreground">{group}</h2>
           {rows.map((a) => {
             const v = latestOf(a);
             return (

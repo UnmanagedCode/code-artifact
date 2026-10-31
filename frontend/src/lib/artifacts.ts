@@ -53,7 +53,10 @@ export function parseRoute(search: string): Route {
   return id ? { view: 'detail', id, project } : { view: 'list', project };
 }
 
-/** The query string for a route: the single writer of the UI's own params, encoded so a name cannot inject another. */
+/**
+ * The query string for a route: the single writer of the UI's own params, encoded so a name cannot inject another.
+ * The project name reaches row hrefs from here, safely: it always follows `?` and is percent-encoded (pinned by the round-trip test).
+ */
 export function routeSearch(route: Route): string {
   const q = new URLSearchParams();
   if (route.project) q.set('project', route.project);

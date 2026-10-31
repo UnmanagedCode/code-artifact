@@ -166,7 +166,9 @@ try {
         await shot('menu-notice');
         assert.ok(await fits(), `menu notice overflows at ${vname} width`);
 
-        // The filter carries through the detail and its Back; Show all drops it.
+        // The filter carries through the detail and its Back; Show all drops it. A row's href matches where its click goes.
+        const rowHref = async () => new URL(await page.getByRole('link', { name: 'Release notes' }).getAttribute('href'), world.url).searchParams;
+        assert.equal((await rowHref()).get('project'), 'demo', 'a filtered row link keeps the filter');
         await page.getByRole('link', { name: 'Release notes' }).click();
         await page.getByRole('heading', { name: 'Release notes', level: 1 }).waitFor();
         assert.equal(new URL(page.url()).searchParams.get('project'), 'demo');
@@ -178,6 +180,18 @@ try {
         await page.getByRole('link', { name: 'Demo site' }).waitFor();
         assert.deepEqual(await sections(), ['demo', 'tools']);
         assert.equal(await search(), '', 'an empty query: location.search reads "" for a bare "?"');
+        assert.ok(!(await rowHref()).has('project'), 'an unfiltered row link carries no project');
+
+        // A plain Back after the notice clears it.
+        await page.goto(`${world.url}/?project=demo`);
+        await page.getByRole('link', { name: 'Release notes' }).click();
+        await page.getByRole('heading', { name: 'Release notes', level: 1 }).waitFor();
+        await navigate('?ccWorktree=wt');
+        await page.getByRole('alert').filter({ hasText: /named no project/ }).waitFor();
+        await page.goBack();
+        await page.getByRole('button', { name: 'Show all' }).waitFor();
+        assert.equal(await search(), '?project=demo');
+        assert.equal(await page.getByRole('alert').count(), 0, 'Back clears the notice');
 
         // Server-rendered pages.
         await page.goto(`${world.url}/a/${world.ids.markdown}/`);

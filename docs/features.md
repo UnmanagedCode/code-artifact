@@ -112,5 +112,5 @@ The plugin's own page (nav label "Code Artifact"):
 - A click opens the list filtered to that project (see **Project filter**) and fetches the list afresh. An already-open page switches in place, without a reload.
 - cc's query is replaced in place with `?project=<name>`, so a reload or Back never repeats the click.
 - A name with no artifacts (cc lists only live projects) shows the project's empty state.
-- A click that names no project shows an alert with **Dismiss** and leaves the view as it was.
+- A click that names no project shows an alert with **Dismiss** and leaves the view as it was. Any later navigation, Back included, clears the alert.
 - A click only reads: it never creates, publishes or deletes anything.

@@ -44,6 +44,7 @@ export function App() {
       const a = menuArrival(location.search, routeRef.current);
       if (!a) {
         setRoute(parseRoute(location.search));
+        setNotice(null);
         return;
       }
       history.replaceState(null, '', a.search);
