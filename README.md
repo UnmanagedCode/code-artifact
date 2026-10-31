@@ -4,7 +4,7 @@ A code-conductor (cc) plugin that lets agents publish versioned, immutable artif
 
 ## Functional summary
 
-- Agents publish artifacts of the kinds in `KINDS` (`src/kinds.js`): markdown documents, static sites and downloadable files. The `app` kind is in the list but refused until it is supported.
+- Agents publish artifacts of the kinds in `KINDS` (`src/kinds.js`): markdown documents, static sites, downloadable files and dynamic apps (a directory with an `artifact.json` that code-artifact runs on demand, with Start, Stop and logs in the UI).
 - Artifacts are versioned and immutable: a published version is never edited in place.
 - Publishing returns a deep link, `http://cc.internal/#plugin/code-artifact/...`, that opens the artifact in the cc web UI.
 - The plugin's page lists artifacts by project, shows their versions and the publishing session, and bulk-deletes old versions.
@@ -33,7 +33,12 @@ npm run typecheck
 - Dotfiles in static artifacts are not served.
 - A published static site must use relative asset URLs, because it is served under the plugin's path prefix. A build with an absolute base (a Vite default `base: '/'`) breaks.
 - Markdown images and relative links are not bundled with the document.
-- The `app` kind is refused.
+- An app runs unsandboxed with the plugin's environment, and sees every cookie of cc's origin.
+- An app's root-absolute URLs in its own HTML (`/x`) break under the proxy; use relative URLs or `$BASE_PATH` (or `prefix: "keep"` for frameworks with a base option).
+- Only the latest version of an app runs; a pinned link to an older version shows a notice.
+- Apps stop on any plugin backend restart and are not restarted; orphan reaping after a crash needs Linux `/proc`.
+- An app that forbids framing (`X-Frame-Options: DENY`, `frame-ancestors 'none'`) cannot show in the wrapper.
+- An app sub-path that starts `/v/<digits>/` cannot be deep-linked (it reads as a pinned version), and navigation inside the frame is not mirrored to cc's URL.
 - Sources are local paths only.
 
 ## Development

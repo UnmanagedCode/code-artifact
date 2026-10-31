@@ -14,11 +14,57 @@ An agent publishes a local file, directory or `.tar.gz` with the `publish_artifa
 | `*.html` / `*.htm` file | `static` | Stored as the site's `index.html` |
 | Directory with a root `index.html` | `static` | Served as a site |
 | `*.tar.gz` / `*.tgz` with a root `index.html` | `static` | Extracted; a sole top-level directory is stripped (`tar czf x.tgz dist`) |
-| Directory or tarball with a root `artifact.json` | `app` | Refused: `KIND_NOT_SUPPORTED` (pass `kind:"static"` to publish it as a site) |
+| Directory or tarball with a root `artifact.json` | `app` | Extracted like a site; the manifest is validated (`APP_MANIFEST_INVALID`). A root `artifact.json` wins over `index.html`; pass `kind:"static"` to publish such a directory as a site |
 | Any other directory | `download` | Packed as `<name>.tar.gz` |
 | Any other file or tarball | `download` | Kept as-is; a tarball is not extracted |
 
-An explicit `kind` overrides inference when the source fits it, else `KIND_SOURCE_MISMATCH`. A tarball is listed (and refused if unsafe) only when no explicit kind is given or the kind is `static`; `kind:"download"` keeps any tarball untouched.
+An explicit `kind` overrides inference when the source fits it, else `KIND_SOURCE_MISMATCH`. A tarball is listed (and refused if unsafe) only when no explicit kind is given or the kind is `static` or `app`; `kind:"download"` keeps any tarball untouched.
+
+### Apps
+
+A dynamic app is a directory or `.tar.gz` with a root `artifact.json`. code-artifact owns its process: **Start, Stop and logs come from the UI only** (no MCP tools). An app is published **stopped**; the user starts it from the link. Publish the source without `node_modules`: the install runs at first Start.
+
+`artifact.json` (unknown keys are refused, which catches typos like `instal`):
+
+| Key | Meaning |
+|---|---|
+| `start` | Required. The command that starts the app, run with `/bin/sh -c` from the working copy. It must listen on `$PORT` on loopback |
+| `install` | Optional. Run once per version before the first start, in the same working copy |
+| `prefix` | `"strip"` (default) or `"keep"`: what path the app is asked for, below |
+
+Environment of `install` and `start`: the backend's environment plus `BASE_PATH` (`/plugins/code-artifact/app/<id>`, no trailing slash), `DATA_DIR` (`artifacts/<id>/data/` in the store; created on Start, survives updates, removed with the artifact) and, for `start` only, `PORT` (a free loopback port).
+
+**Which path the app sees.** The app is served same-origin under `app/<id>/` through the plugin's reverse proxy, so it works inside cc and behind a code-hub share of cc.
+- `strip` forwards `/x` for `app/<id>/x`. Right for hand-written servers: use relative links, or prefix root-absolute ones with `$BASE_PATH`.
+- `keep` forwards `$BASE_PATH/x`. Needed by frameworks that mount under their base themselves (Vite dev, Next `basePath`, SvelteKit, Astro); Vite's HMR WebSocket is accepted only under its `base`.
+
+Worked example, `strip`: `artifact.json` is `{"start": "node server.js"}` and `server.js` is
+
+```js
+require('node:http').createServer((req, res) => {
+  res.setHeader('content-type', 'text/html');
+  res.end(`<h1>Hello</h1><a href="${process.env.BASE_PATH}/about">about</a>`);
+}).listen(process.env.PORT, '127.0.0.1');
+```
+
+Worked example, `keep` (a Vite scaffold published without `node_modules`):
+
+```json
+{
+  "install": "npm ci",
+  "start": "npx vite --host 127.0.0.1 --port $PORT --strictPort --base $BASE_PATH/",
+  "prefix": "keep"
+}
+```
+
+**Lifecycle.**
+- **One process per artifact, always the latest version.** A pinned link to an older version shows "v<n> does not run; only the latest (v<m>) runs" and a link to the latest.
+- **States:** `stopped`, `installing`, `starting`, `running`, `failed`. `starting` ends when the app accepts a connection on its port (or fails: it exits first, or does not listen within 60 s). A failed state shows the error and the log.
+- **Install** runs asynchronously at the first Start of a version, in a fresh working copy of the published tree (`v/<n>/run/`), with a 15-minute limit. A failed install is retried from a clean copy; the published tree and its download never contain the install's output.
+- **`update_artifact` restarts a running app** on the new version (a stopped app stays stopped). `DATA_DIR` persists.
+- **Delete:** deleting the artifact stops the app and removes its data and logs. Deleting a version stops the app only when it is the version that runs, and the app then stays stopped. Prune never removes the running version.
+- **A backend restart stops every app** (the plugin's stop, restart or update, or a crash): apps come back `stopped`, are never adopted, and a crash's orphans are reaped at the next boot.
+- **Logs** (`app.log`, plus `app.log.1` from the previous run) hold the stdout and stderr of install and start and the host's own `[code-artifact]` lines; a running log over 1 MiB is rotated.
 
 ### Project and session
 
@@ -43,14 +89,16 @@ Deep links look like `http://cc.internal/#plugin/code-artifact/a/<id>/` (latest)
 | `markdown` | A themed page with the title, `v<n>` (latest or pinned), a Download link, and the rendered document |
 | `static` | A compact header bar (title, `v<n>` latest or pinned, Download) over an iframe that fills the rest of the view and shows the site as authored, same-origin, with its own scripts and styles. A deeper deep link (`…/a/<id>/docs/page.html`) opens that page in the frame |
 | `download` | A landing page with the file name, size, publish time and a Download button |
+| `app` | A bar (title, `v<n>` latest or pinned, live status, Start/Stop, Logs, Download) over an iframe with the running app. While the app is not running, a panel with a large **Start**, the error if any and a live log tail replaces the iframe. Navigation inside the frame is not mirrored to cc's URL |
 
-Every version can be downloaded from `dl/<id>/<n>`; a static version downloads as `<id>-v<n>.tar.gz`.
+Every version can be downloaded from `dl/<id>/<n>`; a static or app version downloads as `<id>-v<n>.tar.gz` (an app's published tree).
 
 ## UI
 
 The plugin's own page (nav label "Artifacts"):
 
 - **List**: artifacts grouped by project (projects by name, artifacts newest first). Each row shows the title, kind, latest version, relative time, the publishing session (its label, else the 8-character id, else "unknown session"), and an **Open** link. An empty state names `publish_artifact`.
+- **App rows and detail**: an app row shows a status badge. An app's detail view adds a panel with the status, **Start**, **Stop**, **Open**, the latest version's `start`, `install` and `prefix`, and the log tail (polled every second while installing or starting, else every 5 s).
 - **Detail** (`?artifact=<id>`): versions newest first with **Open** (pinned), **Download** and **Delete** (a confirm dialog; disabled on the last version), plus **Delete artifact**.
 - **Delete old…**: deletes versions published more than N days ago, optionally for one project. A live dry-run count is shown first. Every artifact keeps its latest version.
 - Follows cc's light/dark theme and session width; works on a phone.

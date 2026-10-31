@@ -22,6 +22,7 @@ export CC_PROJECTS_ROOT=/path/to/projects-root
 
 - Judges everything `npm test` runs: `server.js`, `src/`, the pure UI logic in `frontend/src/lib/artifacts.ts` and the style guards.
 - React components and `npm run typecheck` are not mutation-judged; a harness takes one runner.
+- App tests run real child processes (the fixture app, `sleep`) on ephemeral ports, and every test's teardown stops them; a mutant that breaks process cleanup can leave `sleep` or the fixture running until the next sweep of that store.
 - Needs a clean worktree; commit before running.
 
 ## Commands
