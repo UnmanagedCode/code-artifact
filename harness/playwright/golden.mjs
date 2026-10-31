@@ -58,9 +58,24 @@ try {
         await page.getByRole('heading', { name: 'Artifacts', level: 1 }).waitFor();
         await page.getByRole('link', { name: 'Release notes' }).waitFor();
         assert.deepEqual(await page.locator('section[aria-label] > h2').allTextContents(), ['demo', 'tools']);
-        assert.equal(await page.getByRole('link', { name: 'Open' }).count(), 5);
+        assert.equal(await page.getByRole('link', { name: 'Open' }).count(), 7);
         assert.equal(await page.getByText('Stopped', { exact: true }).count(), 2, 'both app rows show a status badge');
+        const plain = 'Operational task: fix the foo parser, see the spec and ship…';
+        await page.getByText(plain, { exact: true }).first().waitFor();
         await shot('list');
+        const fits = () => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth);
+        assert.ok(await fits(), `list overflows at ${vname} width`);
+
+        // A markdown session label shows as plain text on the detail view too.
+        await page.goto(`${world.url}/?artifact=${world.ids.labelled}`);
+        await page.getByRole('heading', { name: 'Labelled session', level: 1 }).waitFor();
+        await page.getByText(plain, { exact: true }).first().waitFor();
+        await shot('detail-label');
+        assert.ok(await fits(), `detail overflows at ${vname} width`);
+        await page.goto(`${world.url}/?artifact=${world.ids.unbroken}`);
+        await page.getByRole('heading', { name: 'Unbroken session', level: 1 }).waitFor();
+        await shot('detail-unbroken');
+        assert.ok(await fits(), `detail with an unbroken label overflows at ${vname} width`);
 
         // App detail: status, Start/Stop, the manifest and the (empty) log.
         await stopApps();

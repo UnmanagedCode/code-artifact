@@ -20,7 +20,7 @@ Interface contracts. Everything is relative to the plugin root; cc mounts it at 
 |---|---|---|
 | `publish_artifact` | **path**, **title**, kind, project, sessionId | `{id, title, kind, project, version, sessionId, link, versionLink, bytes, files}`; an app adds `app:{status}` |
 | `update_artifact` | **artifact**, **path**, title, kind, sessionId | the same shape, `version` = the new number; for an app, `app.status` is after the restart of an active app |
-| `list_artifacts` | project, kind | `{artifacts:[{id, title, kind, project, versions, latest:{version, publishedAt, sessionId, sessionLabel}, link, app?}]}`, newest first |
+| `list_artifacts` | project, kind | `{artifacts:[{id, title, kind, project, versions, latest:{version, publishedAt, sessionId, sessionLabel}, link, app?}]}`, newest first; `latest.sessionLabel` is the stored label, not the display-cleaned one |
 | `get_artifact` | **artifact** | the stored record plus `link` and a `versionLink` per version; an app record adds `app:{status, version, error, since}` |
 | `delete_artifact` | **artifact**, version | `{deleted:"artifact", id}` or `{deleted:"version", id, version, latest}` |
 

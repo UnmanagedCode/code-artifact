@@ -19,12 +19,12 @@ export function ArtifactList({ artifacts, embedded, onOpenDetail }: {
   return (
     <div className="grid gap-6">
       {groupByProject(artifacts).map(({ project, artifacts: rows }) => (
-        <section key={project} aria-label={project} className="grid gap-2">
+        <section key={project} aria-label={project} className="grid min-w-0 gap-2">
           <h2 className="text-sm font-medium text-muted-foreground">{project}</h2>
           {rows.map((a) => {
             const v = latestOf(a);
             return (
-              <Card key={a.id} className="flex flex-row flex-wrap items-center justify-between gap-3 p-3">
+              <Card key={a.id} className="flex min-w-0 flex-row flex-wrap items-center justify-between gap-3 p-3">
                 <div className="min-w-0 flex-1">
                   <a
                     href={`?artifact=${encodeURIComponent(a.id)}`}

@@ -8,6 +8,12 @@ import { BROWSER } from './resolve.mjs';
 
 const { bootServer } = await import(BROWSER);
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
+const { Store } = await import(path.join(ROOT, 'src', 'store.js'));
+
+const UNBROKEN_LABEL = `https://example.com/${'a'.repeat(70)}`;
+
+// What cc's display label holds for a session that was untitled at publish: its raw markdown first prompt.
+const MARKDOWN_LABEL = '**Operational task:** fix the `foo` parser, see [the spec](https://example.com/spec) and ship it before the release';
 
 const MARKDOWN = `# Release notes
 
@@ -72,9 +78,27 @@ export async function seed() {
   json.versions[0].publishedAt = new Date(Date.now() - 90 * 86_400_000).toISOString();
   fs.writeFileSync(record, JSON.stringify(json));
 
+  // MCP publishes in this sandbox with no session label, so the markdown-label version is created through the store.
+  const store = await Store.open(srv.sandbox.dirs.CODE_ARTIFACT_STORE);
+  const staging = await store.newStaging();
+  fs.mkdirSync(path.join(staging, 'content'));
+  fs.writeFileSync(path.join(staging, 'content', 'label.csv'), 'a,b\n1,2\n');
+  const labelled = await store.create({
+    title: 'Labelled session', kind: 'download', project: 'demo',
+    version: { file: 'label.csv', bytes: 8, files: 1, sessionId: 'a1b2c3d4-0000', sessionLabel: MARKDOWN_LABEL, source: { name: 'label.csv', type: 'file' } },
+  }, staging);
+
+  const unbrokenStaging = await store.newStaging();
+  fs.mkdirSync(path.join(unbrokenStaging, 'content'));
+  fs.writeFileSync(path.join(unbrokenStaging, 'content', 'label.csv'), 'a,b\n1,2\n');
+  const unbroken = await store.create({
+    title: 'Unbroken session', kind: 'download', project: 'demo',
+    version: { file: 'label.csv', bytes: 8, files: 1, sessionId: 'a1b2c3d4-0000', sessionLabel: UNBROKEN_LABEL, source: { name: 'label.csv', type: 'file' } },
+  }, unbrokenStaging);
+
   return {
     url: srv.url,
-    ids: { markdown: md.id, static: site.id, download: dl.id, app: app.id, failing: failing.id },
+    ids: { unbroken: unbroken.id, labelled: labelled.id, markdown: md.id, static: site.id, download: dl.id, app: app.id, failing: failing.id },
     close: async () => { await srv.close(); fs.rmSync(files, { recursive: true, force: true }); },
   };
 }
