@@ -3,10 +3,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fsp from 'node:fs/promises';
-import http from 'node:http';
 import path from 'node:path';
 import * as tar from 'tar';
-import { fixtureDir, fixtureFile, publish, startApp, tmp } from './_helpers.mjs';
+import { fixtureDir, fixtureFile, publish, rawGet, startApp, tmp } from './_helpers.mjs';
 
 const SITE = { 'index.html': '<h1>home</h1>', 'app.js': 'console.log(1)', 'docs/index.html': 'docs', 'docs/guide.txt': 'guide', 'empty/': '', '.secret': 'nope', 'sub/.hidden/x.txt': 'nope' };
 
@@ -15,6 +14,141 @@ async function staticApp(t, files = SITE) {
   const art = await publish(app, { path: await fixtureDir(t, files), title: 'Site' });
   return { app, art };
 }
+
+const CSP_RE = /default-src 'none'/;
+
+test('raw/<id>/<n> serves the version it names, immutable, whatever is latest; the latest route is a no-cache wrapper', async (t) => {
+  const app = await startApp(t);
+  const art = await publish(app, { path: await fixtureDir(t, { 'index.html': 'ONE' }), title: 'Site' });
+  await app.mcp('update_artifact', { artifact: art.id, path: await fixtureDir(t, { 'index.html': 'TWO' }) });
+  const one = await app.get(`/raw/${art.id}/1/`);
+  assert.equal(one.text, 'ONE');
+  assert.equal(one.headers.get('cache-control'), 'private, max-age=31536000, immutable');
+  assert.equal((await app.get(`/raw/${art.id}/2/`)).text, 'TWO');
+  assert.equal((await app.get(`/raw/${art.id}/3/`)).status, 404);
+  assert.equal((await app.get(`/raw/${art.id}/0/`)).status, 404);
+  assert.equal((await app.get(`/a/${art.id}/`)).headers.get('cache-control'), 'no-cache');
+  assert.equal((await app.get(`/a/${art.id}/v/1/`)).headers.get('cache-control'), 'private, max-age=31536000, immutable');
+  assert.equal((await app.get(`/a/${art.id}/v/3/`)).status, 404);
+});
+
+test('raw: only static artifacts are served, and an unknown id is 404', async (t) => {
+  const app = await startApp(t);
+  const md = await publish(app, { path: await fixtureFile(t, 'a.md', '# x'), title: 'Doc' });
+  assert.equal((await app.get(`/raw/${md.id}/1/`)).status, 404);
+  assert.equal((await app.get('/raw/nope-abc123/1/')).status, 404);
+  assert.equal((await app.get('/raw/NOPE/1/')).status, 404);
+});
+
+test('raw: index.html is the default, files and nested index.html serve, with their content types', async (t) => {
+  const { app, art } = await staticApp(t);
+  assert.equal((await app.get(`/raw/${art.id}/1/`)).text, '<h1>home</h1>');
+  const js = await app.get(`/raw/${art.id}/1/app.js`);
+  assert.equal(js.text, 'console.log(1)');
+  assert.match(js.headers.get('content-type'), /javascript/);
+  assert.equal((await app.get(`/raw/${art.id}/1/docs/`)).text, 'docs');
+  assert.equal((await app.get(`/raw/${art.id}/1/docs/guide.txt`)).text, 'guide');
+});
+
+test('raw: raw/<id>/<n> and a directory without a slash get a relative 301; an empty directory and a file with a slash are 404', async (t) => {
+  const { app, art } = await staticApp(t);
+  const bare = await app.get(`/raw/${art.id}/1`);
+  assert.equal(bare.status, 301);
+  assert.equal(bare.headers.get('location'), '1/');
+  const r = await app.get(`/raw/${art.id}/1/docs`);
+  assert.equal(r.status, 301);
+  assert.equal(r.headers.get('location'), 'docs/');
+  assert.equal((await app.get(`/raw/${art.id}/1/empty/`)).status, 404, 'no listings');
+  assert.equal((await app.get(`/raw/${art.id}/1/app.js/`)).status, 404);
+  assert.equal((await app.get(`/raw/${art.id}/1/missing.txt`)).status, 404);
+});
+
+test('raw: dot segments, encoded slashes and backslashes, and dotfiles are 404', async (t) => {
+  const { app, art } = await staticApp(t);
+  for (const p of ['%2e%2e/%2e%2e/x', '%2e%2e/x', '..%2fapp.js', 'docs%2fguide.txt', 'docs%5cguide.txt', '.secret', 'sub/.hidden/x.txt', '%2esecret', 'docs//guide.txt', '%00']) {
+    assert.equal((await rawGet(app, `/raw/${art.id}/1/${p}`)).status, 404, p);
+  }
+  assert.equal((await app.get(`/raw/${art.id}/1/%zz`)).status, 400, 'an undecodable path is refused by the router');
+  const raw = await rawGet(app, `/raw/${art.id}/1/../../../api/health`);
+  assert.equal(raw.status, 404);
+  assert.notEqual(raw.body, '{"ok":true}');
+});
+
+test('raw: a symlink planted in the store after ingest is 404, to a file or a directory outside the content', async (t) => {
+  const { app, art } = await staticApp(t);
+  const content = path.join(app.storeDir, 'artifacts', art.id, 'v', '1', 'content');
+  const outside = await tmp(t);
+  await fsp.writeFile(path.join(outside, 'secret.txt'), 'SECRET');
+  await fsp.symlink(path.join(outside, 'secret.txt'), path.join(content, 'leak.txt'));
+  await fsp.symlink(outside, path.join(content, 'leakdir'));
+  await fsp.symlink(path.join(content, 'app.js'), path.join(content, 'inner.js'));
+  for (const p of ['leak.txt', 'leakdir/secret.txt', 'leakdir/', 'inner.js']) assert.equal((await app.get(`/raw/${art.id}/1/${p}`)).status, 404, p);
+});
+
+test('raw responses carry no plugin CSP but keep nosniff; the wrapper, other pages and the API keep the CSP', async (t) => {
+  const { app, art } = await staticApp(t);
+  const site = await app.get(`/raw/${art.id}/1/`);
+  assert.equal(site.headers.get('content-security-policy'), null);
+  assert.equal(site.headers.get('x-content-type-options'), 'nosniff');
+  assert.match((await app.get(`/a/${art.id}/`)).headers.get('content-security-policy'), CSP_RE);
+  const md = await publish(app, { path: await fixtureFile(t, 'a.md', '# hi'), title: 'Doc' });
+  assert.match((await app.get(`/a/${md.id}/`)).headers.get('content-security-policy'), CSP_RE);
+  assert.match((await app.get('/api/health')).headers.get('content-security-policy'), CSP_RE);
+  const miss = await app.get(`/raw/${art.id}/1/missing`);
+  assert.equal(miss.status, 404);
+  assert.match(miss.headers.get('content-security-policy'), CSP_RE, 'a 404 under the raw route still carries the CSP');
+});
+
+const frameSrc = (html) => /<iframe[^>]* src="([^"]*)"/.exec(html)?.[1];
+
+test('the static wrapper is a plugin page at latest, pinned and subpath URLs: bridge, theme, nav.js, CSP with the frame allowance', async (t) => {
+  const { app, art } = await staticApp(t);
+  for (const url of [`/a/${art.id}/`, `/a/${art.id}/v/1/`, `/a/${art.id}/docs/guide.txt`, `/a/${art.id}/v/1/docs/`]) {
+    const res = await app.get(url);
+    assert.equal(res.status, 200, url);
+    assert.match(res.headers.get('content-type'), /text\/html/);
+    const head = res.text.slice(res.text.indexOf('<head>'));
+    assert.ok(head.indexOf('/pluginBridge.js') < head.indexOf('/pluginTheme.css'), url);
+    assert.match(head, /_page\/nav\.js"/, url);
+    assert.match(head, /_page\/theme-init\.js"/, url);
+    const csp = res.headers.get('content-security-policy');
+    assert.match(csp, /frame-src 'self'(;|$)/, url);
+    assert.ok(!/frame-src [^;]*(\*|https?:|data:)/.test(csp), 'the frame allowance is same-origin only');
+    assert.ok(!/<iframe[^>]*\bsandbox\b/.test(res.text), 'the site frame is not sandboxed');
+    assert.match(res.text, /class="badge">v1 · (latest|pinned)</);
+    assert.match(res.text, /href="(\.\.\/)+dl\/[^"]+\/1"/, 'a relative Download link');
+  }
+});
+
+test('the wrapper iframe src is relative and names the right version: latest follows the newest, pinned stays, the subpath carries through', async (t) => {
+  const app = await startApp(t);
+  const art = await publish(app, { path: await fixtureDir(t, { 'index.html': 'ONE', 'docs/a.html': 'a' }), title: 'Site' });
+  await app.mcp('update_artifact', { artifact: art.id, path: await fixtureDir(t, { 'index.html': 'TWO', 'docs/a.html': 'a' }) });
+  assert.equal(frameSrc((await app.get(`/a/${art.id}/`)).text), `../../raw/${art.id}/2/`);
+  assert.equal(frameSrc((await app.get(`/a/${art.id}/v/1/`)).text), `../../../../raw/${art.id}/1/`);
+  assert.equal(frameSrc((await app.get(`/a/${art.id}/docs/a.html`)).text), `../../../raw/${art.id}/2/docs/a.html`);
+  assert.equal(frameSrc((await app.get(`/a/${art.id}/v/1/docs/a.html`)).text), `../../../../../raw/${art.id}/1/docs/a.html`);
+  assert.equal(frameSrc((await app.get(`/a/${art.id}/docs?x=1&y=2`)).text), `../../raw/${art.id}/2/docs?x=1&amp;y=2`, 'a query is forwarded, escaped');
+  for (const url of [`/a/${art.id}/`, `/a/${art.id}/v/1/docs/a.html`]) assert.ok(!/^(\/|[a-z]+:)/.test(frameSrc((await app.get(url)).text)), 'never root-relative or absolute');
+});
+
+test('the wrapper src resolves, from the wrapper URL, to the raw route that serves the site', async (t) => {
+  const { app, art } = await staticApp(t);
+  for (const url of [`/a/${art.id}/`, `/a/${art.id}/v/1/docs/guide.txt`]) {
+    const wrapper = new URL(url, `${app.base}/`);
+    const target = new URL(frameSrc((await app.get(url)).text), wrapper);
+    assert.match(target.pathname, new RegExp(`^/raw/${art.id}/1/`));
+    assert.equal((await app.get(target.pathname)).status, 200, url);
+  }
+});
+
+test('the wrapper refuses unsafe subpaths and unknown ids or versions with a 404, and a directory without a slash still wraps', async (t) => {
+  const { app, art } = await staticApp(t);
+  for (const p of ['%2e%2e/x', '../x', 'docs%2fguide.txt', '.secret', 'docs//guide.txt']) assert.equal((await rawGet(app, `/a/${art.id}/${p}`)).status, 404, p);
+  assert.equal((await app.get(`/a/${art.id}/v/9/`)).status, 404);
+  assert.equal((await app.get(`/a/nope-abc123/docs/`)).status, 404);
+  assert.equal((await app.get(`/a/${art.id}/docs`)).status, 200);
+});
 
 test('a/<id> and a/<id>/v/<n> redirect to a relative trailing-slash URL', async (t) => {
   const { app, art } = await staticApp(t);
@@ -26,94 +160,11 @@ test('a/<id> and a/<id>/v/<n> redirect to a relative trailing-slash URL', async 
   assert.equal(r2.headers.get('location'), '1/');
 });
 
-test('the latest route serves the newest version with no-cache; the pinned route serves its own version, immutable', async (t) => {
-  const app = await startApp(t);
-  const art = await publish(app, { path: await fixtureDir(t, { 'index.html': 'ONE' }), title: 'Site' });
-  await app.mcp('update_artifact', { artifact: art.id, path: await fixtureDir(t, { 'index.html': 'TWO' }) });
-  const latest = await app.get(`/a/${art.id}/`);
-  assert.equal(latest.text, 'TWO');
-  assert.equal(latest.headers.get('cache-control'), 'no-cache');
-  const pinned = await app.get(`/a/${art.id}/v/1/`);
-  assert.equal(pinned.text, 'ONE');
-  assert.equal(pinned.headers.get('cache-control'), 'private, max-age=31536000, immutable');
-  assert.equal((await app.get(`/a/${art.id}/v/2/`)).text, 'TWO');
-  assert.equal((await app.get(`/a/${art.id}/v/3/`)).status, 404);
-  assert.equal((await app.get(`/a/${art.id}/v/0/`)).status, 404);
-});
-
-test('static: index.html is the default, files and nested index.html serve, with their content types', async (t) => {
-  const { app, art } = await staticApp(t);
-  assert.equal((await app.get(`/a/${art.id}/`)).text, '<h1>home</h1>');
-  const js = await app.get(`/a/${art.id}/app.js`);
-  assert.equal(js.text, 'console.log(1)');
-  assert.match(js.headers.get('content-type'), /javascript/);
-  assert.equal((await app.get(`/a/${art.id}/docs/`)).text, 'docs');
-  assert.equal((await app.get(`/a/${art.id}/docs/guide.txt`)).text, 'guide');
-  assert.equal((await app.get(`/a/${art.id}/v/1/docs/guide.txt`)).text, 'guide');
-});
-
-test('static: a directory without a slash gets a relative 301; an empty directory and a file with a slash are 404', async (t) => {
-  const { app, art } = await staticApp(t);
-  const r = await app.get(`/a/${art.id}/docs`);
-  assert.equal(r.status, 301);
-  assert.equal(r.headers.get('location'), 'docs/');
-  const pinned = await app.get(`/a/${art.id}/v/1/docs`);
-  assert.equal(pinned.status, 301);
-  assert.equal(pinned.headers.get('location'), 'docs/');
-  assert.equal((await app.get(`/a/${art.id}/empty/`)).status, 404, 'no listings');
-  assert.equal((await app.get(`/a/${art.id}/app.js/`)).status, 404);
-  assert.equal((await app.get(`/a/${art.id}/missing.txt`)).status, 404);
-});
-
-test('static: dot segments, encoded slashes and backslashes, and dotfiles are 404', async (t) => {
-  const { app, art } = await staticApp(t);
-  for (const p of ['%2e%2e/%2e%2e/x', '..%2fapp.js', 'docs%2fguide.txt', 'docs%5cguide.txt', '.secret', 'sub/.hidden/x.txt', '%2esecret', 'docs//guide.txt', '%00']) {
-    const res = await app.get(`/a/${art.id}/${p}`);
-    assert.equal(res.status, 404, p);
-  }
-  assert.equal((await app.get(`/a/${art.id}/%zz`)).status, 400, 'an undecodable path is refused by the router');
-  // fetch() normalises dot segments away, so send the raw request line.
-  const raw = await new Promise((resolve, reject) => {
-    const url = new URL(app.base);
-    http.get({ host: url.hostname, port: url.port, path: `/a/${art.id}/../../api/health` }, (res) => {
-      let body = '';
-      res.on('data', (d) => { body += d; });
-      res.on('end', () => resolve({ status: res.statusCode, body }));
-    }).on('error', reject);
-  });
-  assert.equal(raw.status, 404);
-  assert.notEqual(raw.body, '{"ok":true}');
-});
-
-test('static: a symlink planted in the store after ingest is 404, to a file or a directory outside the content', async (t) => {
-  const { app, art } = await staticApp(t);
-  const content = path.join(app.storeDir, 'artifacts', art.id, 'v', '1', 'content');
-  const outside = await tmp(t);
-  await fsp.writeFile(path.join(outside, 'secret.txt'), 'SECRET');
-  await fsp.symlink(path.join(outside, 'secret.txt'), path.join(content, 'leak.txt'));
-  await fsp.symlink(outside, path.join(content, 'leakdir'));
-  await fsp.symlink(path.join(content, 'app.js'), path.join(content, 'inner.js'));
-  for (const p of ['leak.txt', 'leakdir/secret.txt', 'leakdir/', 'inner.js']) assert.equal((await app.get(`/a/${art.id}/${p}`)).status, 404, p);
-});
-
-test('static responses carry no plugin CSP but keep nosniff; pages and the API keep the CSP', async (t) => {
-  const { app, art } = await staticApp(t);
-  const site = await app.get(`/a/${art.id}/`);
-  assert.equal(site.headers.get('content-security-policy'), null);
-  assert.equal(site.headers.get('x-content-type-options'), 'nosniff');
-  const md = await publish(app, { path: await fixtureFile(t, 'a.md', '# hi'), title: 'Doc' });
-  assert.match((await app.get(`/a/${md.id}/`)).headers.get('content-security-policy'), /default-src 'none'/);
-  assert.match((await app.get('/api/health')).headers.get('content-security-policy'), /default-src 'none'/);
-  const miss = await app.get(`/a/${art.id}/missing`);
-  assert.equal(miss.status, 404);
-  assert.match(miss.headers.get('content-security-policy'), /default-src 'none'/, 'a 404 under a static site still carries the CSP');
-});
-
-test('a lone html file serves as the site root', async (t) => {
+test('a lone html file is the site root of its raw version', async (t) => {
   const app = await startApp(t);
   const art = await publish(app, { path: await fixtureFile(t, 'page.html', '<p>lone</p>'), title: 'Lone' });
   assert.equal(art.kind, 'static');
-  assert.equal((await app.get(`/a/${art.id}/`)).text, '<p>lone</p>');
+  assert.equal((await app.get(`/raw/${art.id}/1/`)).text, '<p>lone</p>');
 });
 
 test('markdown: the page has the bridge first, the theme, relative assets, sanitized content and the CSP', async (t) => {

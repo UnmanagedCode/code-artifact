@@ -81,7 +81,7 @@ test('the CSP and nosniff are on every response: UI, API, 404, 503, 415 and erro
 test('the CSP lets the host assets and the UI work: self scripts and fonts, inline styles, https/data images, same-origin frames only', async (t) => {
   const app = await startApp(t);
   const csp = (await app.get('/api/health')).headers.get('content-security-policy');
-  for (const d of ["script-src 'self'", "style-src 'self' 'unsafe-inline'", "font-src 'self'", 'img-src \'self\' https: data:', "connect-src 'self'", "frame-ancestors 'self'", "base-uri 'none'", "form-action 'self'"]) {
+  for (const d of ["script-src 'self'", "style-src 'self' 'unsafe-inline'", "font-src 'self'", 'img-src \'self\' https: data:', "connect-src 'self'", "frame-src 'self'", "frame-ancestors 'self'", "base-uri 'none'", "form-action 'self'"]) {
     assert.ok(csp.includes(d), d);
   }
 });

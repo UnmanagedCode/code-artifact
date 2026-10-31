@@ -76,15 +76,16 @@ Every non-GET/HEAD/OPTIONS request needs `Content-Type: application/json` (else 
 | `GET a/:id`, `GET a/:id/v/:n` | `301` to the relative `<id>/` and `<n>/` |
 | `GET a/:id/…` | The latest version; `Cache-Control: no-cache` |
 | `GET a/:id/v/:n/…` | A pinned version (`:n` is `[1-9][0-9]*`); `Cache-Control: private, max-age=31536000, immutable` |
+| `GET raw/:id/:n/…` | A static site's files, byte for byte, always pinned to version `:n` (`:n` is `[1-9][0-9]*`); `Cache-Control: private, max-age=31536000, immutable`; no plugin CSP; `raw/:id/:n` redirects to `:n/` |
 | `GET dl/:id/:n` | `Content-Disposition: attachment`: the stored file, or a `<id>-v<n>.tar.gz` of a static site |
 | `GET _page/page.css`, `_page/fallback.css`, `_page/theme-init.js`, `_page/nav.js` | Assets of the server-rendered pages |
 
-Per kind at the version root: `markdown` and `download` answer a page (any deeper subpath is 404); `static` serves files as-is, `index.html` for a directory URL, a relative `301` for a directory without a trailing slash, never a listing, never a dotfile. A path segment that is empty, `.`/`..`, dot-led, or holds `/`, `\` or NUL after decoding is 404, as is anything whose real path leaves the version's `content/`.
+Per kind at the version root: `markdown` and `download` answer a page (any deeper subpath is 404); `static` answers a plugin-rendered wrapper page (the shared page shell: bridge, theme, `nav.js`; a header bar with title, `v<n>` latest or pinned and the Download link; and a same-origin iframe, not sandboxed) at any safe subpath, whose iframe `src` is the relative URL `raw/<id>/<n>/<subpath>` (the current latest `n` for a latest URL; a query string is forwarded). The raw route serves the files: `index.html` for a directory URL, a relative `301` for a directory without a trailing slash, never a listing, never a dotfile. A path segment that is empty, `.`/`..`, dot-led, or holds `/`, `\` or NUL after decoding is 404, as is anything whose real path leaves the version's `content/`.
 
 ## Headers
 
 - Every response carries `X-Content-Type-Options: nosniff` and the plugin CSP (`securityHeaders` in `src/webui.js`), the 404, 503 and 415 included.
-- **Static site responses carry no CSP**: a site runs as authored.
+- **Raw site responses (`raw/…`) carry no CSP**: a site runs as authored. The wrapper and every other page keep it, including `frame-src 'self'` for the wrapper's iframe.
 - Embedding: `frame-ancestors 'self'`.
 
 ## Deep links

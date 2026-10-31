@@ -41,7 +41,7 @@ Deep links look like `http://cc.internal/#plugin/code-artifact/a/<id>/` (latest)
 | Kind | What the link shows |
 |---|---|
 | `markdown` | A themed page with the title, `v<n>` (latest or pinned), a Download link, and the rendered document |
-| `static` | The site as authored, same-origin, with its own scripts and styles |
+| `static` | A compact header bar (title, `v<n>` latest or pinned, Download) over an iframe that fills the rest of the view and shows the site as authored, same-origin, with its own scripts and styles. A deeper deep link (`…/a/<id>/docs/page.html`) opens that page in the frame |
 | `download` | A landing page with the file name, size, publish time and a Download button |
 
 Every version can be downloaded from `dl/<id>/<n>`; a static version downloads as `<id>-v<n>.tar.gz`.

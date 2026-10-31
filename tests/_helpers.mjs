@@ -142,3 +142,15 @@ export async function publish(app, args, caller) {
   if (data.error) throw new Error(data.error);
   return data.result;
 }
+
+/** GET with the request line exactly as given: fetch() normalises `..` and `%2e%2e` away. Resolves `{status, body}`. */
+export function rawGet(app, requestPath) {
+  const url = new URL(app.base);
+  return new Promise((resolve, reject) => {
+    http.get({ host: url.hostname, port: url.port, path: requestPath }, (res) => {
+      let body = '';
+      res.on('data', (d) => { body += d; });
+      res.on('end', () => resolve({ status: res.statusCode, body, headers: res.headers }));
+    }).on('error', reject);
+  });
+}

@@ -60,7 +60,8 @@ Node ESM backend (Express 4) plus a React/Vite/Tailwind v4 UI, one package. Cont
 - `serve.js` parses the raw (percent-encoded) `req.path`, not Express's decoded params, so an encoded `%2f` stays a refusal. Each segment is decoded and refused when empty, dot-led, or holding `/`, `\` or NUL.
 - A file is served only when `lstat` says it is a regular file and its `realpath` stays inside the real `content/` directory.
 - `res.sendFile` gets a relative path with `root`: an absolute path makes `dotfiles:'deny'` refuse everything under the store's dot-directory.
-- Static responses drop the CSP header (`res.removeHeader`); everything else keeps it.
+- A static artifact is two routes: `a/…` answers the wrapper page (`staticPage` in `src/pages.js`), and `raw/<id>/<n>/…` serves the files through the path resolution above. The wrapper exists because cc's `navigate` is only seen by documents that load the bridge and `nav.js`, which a raw site does not. The iframe `src` is relative, with one `../` per directory level of the wrapper's URL, and always names a concrete version.
+- Raw responses drop the CSP header (`res.removeHeader`); everything else keeps it.
 - The page assets under `_page/` are served from their one source file each, so the pages render while the UI is unbuilt.
 - cc steers a page it already shows with `navigate` (a `replaceState` plus a synthetic `popstate`, never a load). `frontend/public/nav.js`, loaded by the UI document and by every server-rendered page, reloads when the path changes under the document; a query-only or hash-only change does not reload. Without it, opening an artifact from the UI, or a second artifact link while the plugin is docked, would leave stale content.
 - Markdown is rendered once at publish and read from `rendered.html`, so serving never parses.

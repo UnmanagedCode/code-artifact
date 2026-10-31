@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import * as tar from 'tar';
 import { ID_RE } from './links.js';
 import { CONTENT, RENDERED } from './ingest.js';
-import { markdownPage, downloadPage } from './pages.js';
+import { markdownPage, downloadPage, staticPage } from './pages.js';
 import { plain, wrap } from './http.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -100,15 +100,34 @@ export function contentRouter(getStore) {
     const dir = store.versionDir(id, version.n);
     res.set('Cache-Control', pinned ? PINNED_CACHE : 'no-cache');
 
-    if (record.kind === 'static') return serveStatic(res, next, path.join(dir, CONTENT), sub);
-    if (sub !== '/') return plain(res, 404, 'Not found');
-    const prefix = pinned ? '../../../../' : '../../';
+    // Relative path from this page back to the plugin root: one `../` per directory level of the URL.
+    const prefix = '../'.repeat(req.path.split('/').length - 2);
     const ctx = { prefix, id, version, latest: !pinned };
+    if (record.kind === 'static') {
+      // The site itself is served raw and pinned; this page is the plugin-rendered wrapper around it.
+      if (!safeSegments(sub)) return plain(res, 404, 'Not found');
+      const search = req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : '';
+      return res.type('html').send(staticPage({ ...ctx, frameSrc: `${prefix}raw/${id}/${version.n}${sub}${search}` }));
+    }
+    if (sub !== '/') return plain(res, 404, 'Not found');
     if (record.kind === 'markdown') {
       const rendered = await fsp.readFile(path.join(dir, RENDERED), 'utf8');
       return res.type('html').send(markdownPage({ ...ctx, rendered }));
     }
     return res.type('html').send(downloadPage(ctx));
+  }));
+
+  // The static site's files, byte for byte, always pinned to a concrete version.
+  r.get('/raw/*', wrap(async (req, res, next) => {
+    const m = /^\/raw\/([^/]+)\/([1-9][0-9]*)(\/.*)?$/.exec(req.path);
+    if (!m || !ID_RE.test(m[1])) return plain(res, 404, 'Not found');
+    const [, id, n, rest] = m;
+    if (rest === undefined) return res.redirect(301, `${n}/`);
+    const store = getStore();
+    const record = await store.get(id);
+    if (record?.kind !== 'static' || !record.versions.some((v) => v.n === Number(n))) return plain(res, 404, 'Not found');
+    res.set('Cache-Control', PINNED_CACHE);
+    return serveStatic(res, next, path.join(store.versionDir(id, Number(n)), CONTENT), rest);
   }));
 
   r.get('/dl/:id/:n', wrap(async (req, res, next) => {

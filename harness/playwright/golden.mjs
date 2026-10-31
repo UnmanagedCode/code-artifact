@@ -39,7 +39,7 @@ try {
         await page.emulateMedia({ colorScheme: scheme });
         const shot = async (step) => {
           const file = path.join(outDir, `${step}-${vname}-${scheme}.png`);
-          await page.screenshot({ path: file, animations: 'disabled', fullPage: step.startsWith('page-') });
+          await page.screenshot({ path: file, animations: 'disabled', fullPage: step.startsWith('page-') && !step.startsWith('page-static') });
           shots.push(file);
         };
 
@@ -91,8 +91,18 @@ try {
         await page.getByRole('link', { name: 'Download' }).waitFor();
         await shot('page-download');
         await page.goto(`${world.url}/a/${world.ids.static}/`);
-        await page.getByRole('heading', { name: 'Demo site' }).waitFor();
+        // The wrapper: a compact bar plus an iframe that fills the rest of the viewport and shows the site.
+        await page.frameLocator('iframe.site').getByRole('heading', { name: 'Demo site' }).waitFor();
+        const frameBox = await page.locator('iframe.site').boundingBox();
+        const barBox = await page.locator('.bar').boundingBox();
+        assert.ok(Math.abs(frameBox.y - (barBox.y + barBox.height)) < 2, 'the iframe sits directly under the bar');
+        assert.ok(Math.abs(frameBox.y + frameBox.height - viewport.height) < 2, 'the iframe fills the viewport');
+        assert.ok(Math.abs(frameBox.width - viewport.width) < 2, 'the iframe spans the width');
+        assert.match(await page.locator('iframe.site').getAttribute('src'), /^\.\.\/\.\.\/raw\//);
         await shot('page-static');
+        await page.goto(`${world.url}/a/${world.ids.static}/v/1/`);
+        await page.frameLocator('iframe.site').getByRole('heading', { name: 'Demo site' }).waitFor();
+        await shot('page-static-pinned');
       }, { headless: true, viewport });
     }
   }

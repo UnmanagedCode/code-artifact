@@ -6,8 +6,8 @@ import { plain } from './http.js';
 
 export const DEFAULT_DIST = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'frontend', 'dist');
 
-// style-src 'unsafe-inline' is for Radix Dialog; img-src for markdown images.
-const CSP = "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' https: data:; connect-src 'self'; frame-ancestors 'self'; base-uri 'none'; form-action 'self'";
+// style-src 'unsafe-inline' is for Radix Dialog; img-src for markdown images; frame-src for the static-site wrapper's iframe.
+const CSP = "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' https: data:; connect-src 'self'; frame-src 'self'; frame-ancestors 'self'; base-uri 'none'; form-action 'self'";
 // The only files served from dist: a name that starts with a letter or digit, one of these extensions, at the root or under assets/.
 const ASSET_RE = /^\/((?:assets\/)?[A-Za-z0-9][A-Za-z0-9_-]*\.(html|js|css|svg|png|ico|webmanifest))$/;
 

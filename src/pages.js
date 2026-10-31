@@ -10,8 +10,7 @@ export function formatBytes(n) {
 }
 
 // `prefix` is the relative path from the page back to the plugin root ("../../" under a/<id>/).
-function shell({ prefix, title, header, body }) {
-  return `<!doctype html>
+const head = (prefix, title) => `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -24,7 +23,10 @@ function shell({ prefix, title, header, body }) {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${escapeHtml(title)}</title>
 </head>
-<body>
+`;
+
+function shell({ prefix, title, header, body }) {
+  return `${head(prefix, title)}<body>
 <main class="page">
 <header class="page-head">
 <h1>${escapeHtml(title)}</h1>
@@ -56,4 +58,18 @@ export function downloadPage({ prefix, id, version, latest }) {
 <p><a class="btn primary" href="${downloadLink(prefix, id, version.n)}">Download</a></p>
 </section>`;
   return shell({ prefix, title: version.title, header, body });
+}
+
+/** The wrapper for a static version: a compact header bar over an iframe (`frameSrc`, a relative raw URL) that shows the site. */
+export function staticPage({ prefix, id, version, latest, frameSrc }) {
+  return `${head(prefix, version.title)}<body class="wrap">
+<header class="bar">
+<h1>${escapeHtml(version.title)}</h1>
+<span class="badge">v${version.n} · ${latest ? 'latest' : 'pinned'}</span>
+<a class="btn" href="${downloadLink(prefix, id, version.n)}">Download</a>
+</header>
+<iframe class="site" title="${escapeHtml(version.title)}" src="${escapeHtml(frameSrc)}"></iframe>
+</body>
+</html>
+`;
 }
