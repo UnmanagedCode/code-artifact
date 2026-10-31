@@ -14,6 +14,8 @@ if (opts.failBeforeListen) { console.error('fixture failing before listen'); pro
 if (opts.ignoreTerm) process.on('SIGTERM', () => {});
 if (DATA_DIR) fs.writeFileSync(data('pid'), String(process.pid));
 
+let flooding = false;
+let floodWritten = 0;
 const server = http.createServer((req, res) => {
   if (opts.requireBase && !(req.url === BASE_PATH || req.url.startsWith(`${BASE_PATH}/`) || req.url.startsWith(`${BASE_PATH}?`))) {
     res.writeHead(404, { 'content-type': 'text/plain' });
@@ -54,6 +56,25 @@ const server = http.createServer((req, res) => {
     for (let i = 1; i <= Number(u.searchParams.get('lines')); i++) out += `line-${String(i).padStart(5, '0')}\n`;
     process.stdout.write(`${out}END\n`);
     return json({ ok: true });
+  }
+  if (p === '/flood') {
+    // Writes `chunk` bytes of log every millisecond for `ms` ms, in the background.
+    const chunk = 'f'.repeat(Number(u.searchParams.get('chunk')) - 1);
+    const until = Date.now() + Number(u.searchParams.get('ms'));
+    flooding = true;
+    const timer = setInterval(() => {
+      if (Date.now() >= until) { clearInterval(timer); flooding = false; return; }
+      process.stdout.write(`${chunk}\n`);
+      floodWritten += chunk.length + 1;
+    }, 1);
+    return json({ ok: true });
+  }
+  if (p === '/flood-state') return json({ flooding, written: floodWritten });
+  if (p === '/abort-body') {
+    // Promises 1000 bytes, sends a few, then drops the connection.
+    res.writeHead(200, { 'content-type': 'text/plain', 'content-length': 1000 });
+    res.write('partial');
+    return setTimeout(() => res.socket.destroy(), 20);
   }
   if (p === '/ws-close') {
     // Ends every upgraded connection from the app's side, leaving the process running.

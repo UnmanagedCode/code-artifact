@@ -4,7 +4,7 @@ import path from 'node:path';
 import { Refusal } from './refusal.js';
 import { CONTENT } from './ingest.js';
 import { MOUNT, appBasePath } from './links.js';
-import { note, openRunLog, rotateIfOver } from './appLog.js';
+import { createRotator, note, openRunLog } from './appLog.js';
 import * as realProcs from './appProcs.js';
 
 const { HAS_PROC, RUN_MARKER } = realProcs;
@@ -125,7 +125,7 @@ export function createAppHost({ store: storeOrGetter, storeDir = null, mount = M
       if (version.app.install) {
         void logNote(id, `install v${n}: ${version.app.install}`);
         const result = await runInstall(id, s, version.app.install, run, envFor(id, s));
-        if (s.pgid) await killGroup(s.pgid, t.graceMs); // anything the install left running
+        if (s.pgid && !s.stopping) await killGroup(s.pgid, t.graceMs); // anything the install left running (a stop kills it itself)
         s.pgid = null;
         if (!alive(id, s)) return;
         if (!result.ok) return fail(id, s, result.reason);
@@ -190,7 +190,8 @@ export function createAppHost({ store: storeOrGetter, storeDir = null, mount = M
       throw new Error('the app host is shut down');
     }
     states.set(id, s);
-    s.logTimer = setInterval(() => { rotateIfOver(st.logFile(id), t.logCapBytes).catch(() => {}); }, t.logCheckMs);
+    const rotate = createRotator(st.logFile(id), t.logCapBytes);
+    s.logTimer = setInterval(() => { rotate().catch(() => {}); }, t.logCheckMs);
     s.logTimer.unref();
     s.launching = launch(id, s, version, installed).catch((e) => fail(id, s, `internal error: ${e.message}`));
     return publicStatus(s);

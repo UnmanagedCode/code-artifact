@@ -20,23 +20,30 @@ export async function openRunLog(file) {
 export const note = (file, line) => fsp.appendFile(file, `[code-artifact] ${line}\n`);
 
 /**
- * When `file` exceeds `cap` bytes, keeps its last `cap` bytes in `file.1` and truncates it. A round is skipped when the app
- * wrote between the stat and the read (the tail could be partial); the next tick looks again.
+ * A rotation check for `file`, called on a timer: when the log exceeds `cap` bytes, its last `cap` bytes go to `file.1`
+ * and it is truncated. A round where the app wrote between the stat and the read is skipped (the tail could be partial),
+ * but at most `maxSkips` rounds in a row: an app that writes continuously is rotated anyway, with a possibly partial tail.
+ * `afterStat` is a test seam that runs between the stat and the read.
  */
-export async function rotateIfOver(file, cap) {
-  let size;
-  try { size = (await fsp.stat(file)).size; } catch { return; }
-  if (size <= cap) return;
-  const handle = await fsp.open(file, 'r');
-  try {
-    const buf = Buffer.alloc(cap);
-    const { bytesRead } = await handle.read(buf, 0, cap, size - cap);
-    if ((await handle.stat()).size !== size) return;
-    await fsp.writeFile(`${file}.1`, buf.subarray(0, bytesRead));
-  } finally {
-    await handle.close();
-  }
-  await fsp.truncate(file, 0);
+export function createRotator(file, cap, { maxSkips = 1, afterStat = async () => {} } = {}) {
+  let skipped = 0;
+  return async function rotate() {
+    let size;
+    try { size = (await fsp.stat(file)).size; } catch { return; }
+    if (size <= cap) { skipped = 0; return; }
+    await afterStat();
+    const handle = await fsp.open(file, 'r');
+    try {
+      const buf = Buffer.alloc(cap);
+      const { bytesRead } = await handle.read(buf, 0, cap, size - cap);
+      if ((await handle.stat()).size !== size && skipped < maxSkips) { skipped++; return; }
+      await fsp.writeFile(`${file}.1`, buf.subarray(0, bytesRead));
+    } finally {
+      await handle.close();
+    }
+    skipped = 0;
+    await fsp.truncate(file, 0);
+  };
 }
 
 /** The last `bytes` bytes of `file` as text; empty when there is no file yet. */

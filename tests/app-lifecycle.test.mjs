@@ -244,3 +244,38 @@ test('Stop also kills a descendant that left the process group, found by the run
   await pidGone(escaped);
   assert.deepEqual(await markerPids(app.storeDir), []);
 });
+
+test('an app that writes continuously is still rotated: app.log stays bounded and app.log.1 appears', async (t) => {
+  const app = await startApps(t);
+  const pub = await publishApp(t, app);
+  await runApp(app, pub.id);
+  const log = path.join(dirOf(app, pub.id), 'app.log');
+  // ~2 KB every millisecond for 1.5 s: with a 4 KiB cap checked every 50 ms, an app that is never rotated reaches the whole amount.
+  await fetch(`${app.base}/app/${pub.id}/flood?chunk=2000&ms=1500`);
+  const rotated = `${log}.1`;
+  let largest = 0;
+  const seen = new Set();
+  let state;
+  await waitFor(async () => {
+    largest = Math.max(largest, (await fsp.stat(log)).size);
+    const mtime = await fsp.stat(rotated).then((s) => s.mtimeMs, () => null);
+    if (mtime !== null) seen.add(mtime);
+    state = await (await fetch(`${app.base}/app/${pub.id}/flood-state`)).json();
+    return !state.flooding;
+  }, { every: 5, timeout: 10_000, what: 'the flood to end' });
+  assert.ok(seen.size >= 3, `the log was rotated again and again while the app wrote (${seen.size} rotations seen)`);
+  assert.ok(largest <= state.written / 2, `the log stayed far below what was written: ${largest} of ${state.written} bytes`);
+  await waitFor(async () => (await fsp.stat(log)).size <= 4096, { what: 'the log to settle at the cap' });
+});
+
+test('a plain Stop logs stopped and never a failure', async (t) => {
+  const app = await startApps(t);
+  const pub = await publishApp(t, app);
+  await runApp(app, pub.id);
+  await app.post(`/api/apps/${pub.id}/stop`, {});
+  await new Promise((r) => setTimeout(r, 150)); // the killed process's exit event can arrive just after Stop resolves
+  const log = await logOf(app, pub.id);
+  assert.match(log, /\[code-artifact\] stopped/);
+  assert.doesNotMatch(log, /failed:/);
+  assert.equal((await app.get(`/api/apps/${pub.id}`)).data.status, 'stopped');
+});

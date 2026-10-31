@@ -269,16 +269,19 @@ test('a refused upgrade\'s socket is destroyed by the server although the client
   const connections = () => new Promise((resolve) => app.server.getConnections((_err, n) => resolve(n)));
   const url = new URL(app.base);
   const client = net.connect({ port: Number(url.port), host: url.hostname, allowHalfOpen: true });
-  t.after(() => client.destroy());
-  let received = '';
-  client.on('data', (d) => { received += d; });
-  const ended = once(client, 'end');
-  await once(client, 'connect');
-  client.write('GET /ws HTTP/1.1\r\nHost: x\r\nConnection: Upgrade\r\nUpgrade: fixture\r\n\r\n');
-  await ended;
-  assert.match(received, /^HTTP\/1\.1 404 /);
-  // A half-closed server socket would stay counted until the client closed too.
-  await waitFor(async () => (await connections()) === 0, { what: 'the server to release its end of the refused socket' });
+  try {
+    let received = '';
+    client.on('data', (d) => { received += d; });
+    const ended = once(client, 'end');
+    await once(client, 'connect');
+    client.write('GET /ws HTTP/1.1\r\nHost: x\r\nConnection: Upgrade\r\nUpgrade: fixture\r\n\r\n');
+    await ended;
+    assert.match(received, /^HTTP\/1\.1 404 /);
+    // A half-closed server socket would stay counted until the client closed too.
+    await waitFor(async () => (await connections()) === 0, { timeout: 3000, what: 'the server to release its end of the refused socket' });
+  } finally {
+    client.destroy(); // before teardown closes the server, so a failure here fails cleanly instead of hanging it
+  }
 });
 
 test('a client that leaves while the upstream connect is pending takes the upstream socket with it and nothing is written', async () => {
@@ -314,4 +317,19 @@ test('an app that ends an upgraded socket itself, process still running, closes 
   await socketClosed(up.socket);
   await waitFor(async () => (await open()) === 0, { what: 'the app to drop its connection' });
   assert.equal((await app.get(`/api/apps/${pub.id}`)).data.status, 'running', 'the app itself never stopped');
+});
+
+test('an app that drops its connection mid-body settles the client\'s request with an error, not a hang', async (t) => {
+  const app = await startApps(t);
+  const pub = await publishApp(t, app);
+  await runApp(app, pub.id);
+  const guard = new AbortController();
+  const timer = setTimeout(() => guard.abort(), 5000);
+  t.after(() => clearTimeout(timer));
+  const outcome = await (async () => {
+    const res = await fetch(`${app.base}/app/${pub.id}/abort-body`, { signal: guard.signal });
+    return res.text();
+  })().then(() => 'completed', (e) => e);
+  assert.notEqual(outcome, 'completed', 'a truncated body is not a complete one');
+  assert.notEqual(outcome.name, 'AbortError', 'the request settled by itself; only our own guard would abort it');
 });

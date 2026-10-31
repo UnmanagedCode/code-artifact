@@ -15,9 +15,13 @@ function fakeProcs() {
   let pid = 1000;
   let port = 40_000;
   const fake = {
-    children: [], kills: [], listening: true,
+    children: [], kills: [], listening: true, exitOnKill: true,
     spawnGroup: (cmd) => { const c = new EventEmitter(); c.pid = ++pid; c.cmd = cmd; fake.children.push(c); return c; },
-    killGroup: async (pgid) => { fake.kills.push(pgid); return true; },
+    // Like a real kill, the group's process reports its exit while the kill is being carried out.
+    killGroup: async (pgid) => {
+      fake.kills.push(pgid);
+      if (fake.exitOnKill) fake.children.find((c) => c.pid === pgid)?.emit('exit', null, 'SIGTERM');
+    },
     probe: async () => (fake.listening ? '127.0.0.1' : null),
     freePort: async () => ++port,
     reapMarked: async () => 0,
@@ -80,4 +84,14 @@ test('a run that failed and was started again ignores the failed run\'s late eve
   first.emit('error', new Error('late')); // its error listener outlived its exit listener
   assert.deepEqual(status(), before);
   assert.equal(procs.kills.length, killsAfterFailure, 'the stale run is not killed a second time');
+});
+
+test('a requested Stop is not a failure: the killed process\'s exit is ignored, and the group is killed once', async (t) => {
+  const { apps, procs, id, status, running } = await setup(t);
+  await apps.start(id);
+  await running();
+  await apps.stop(id);
+  assert.deepEqual(status().status, 'stopped');
+  assert.equal(status().error, null);
+  assert.equal(procs.kills.length, 1, 'only the Stop killed the group: no cleanup of a failure raced it');
 });

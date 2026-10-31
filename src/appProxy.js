@@ -46,9 +46,6 @@ export function appProxyRouter(apps) {
 
     // Everything that can throw while rewriting runs here, inside a try below: an escaped throw would kill the backend.
     const relay = (ures) => {
-      // The app's own policy applies to the app: ours is for the plugin's pages.
-      res.removeHeader('Content-Security-Policy');
-      res.removeHeader('X-Content-Type-Options');
       res.statusCode = ures.statusCode;
       res.statusMessage = ures.statusMessage;
       const seen = new Map();
@@ -64,6 +61,11 @@ export function appProxyRouter(apps) {
         seen.set(lower, entry);
       }
       for (const { name, values } of seen.values()) res.setHeader(name, values.length === 1 ? values[0] : values);
+      // The app's own policy applies to the app: ours is for the plugin's pages. Removed last, so a throw above keeps it on the 502.
+      for (const h of ['content-security-policy', 'x-content-type-options']) if (!seen.has(h)) res.removeHeader(h);
+      // An app that dies mid-body must not leave the client waiting for the rest.
+      ures.once('error', () => res.destroy());
+      ures.once('close', () => { if (!ures.complete) res.destroy(); });
       ures.pipe(res);
     };
     const up = http.request({ host: target.host, port: target.port, method: req.method, path, headers }, (ures) => {
