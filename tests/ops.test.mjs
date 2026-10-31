@@ -188,5 +188,7 @@ test('prune keeps every latest version, respects the project scope, and dryRun d
   assert.equal((await store.get(b.id)).versions.length, 2, 'the other project is untouched');
   assert.deepEqual((await store.get(a.id)).versions.map((v) => v.n), [2]);
   await assert.rejects(ops.prune({ olderThanDays: 0 }), refusal('INVALID_ARGUMENT'));
+  for (const days of [1e9, 100_001, 1.5, Infinity]) await assert.rejects(ops.prune({ olderThanDays: days, dryRun: true }), refusal('INVALID_ARGUMENT'), String(days));
+  await ops.prune({ olderThanDays: 100_000, dryRun: true });
   await assert.rejects(ops.prune({ olderThanDays: 1, dryRun: 'yes' }), refusal('INVALID_ARGUMENT'));
 });

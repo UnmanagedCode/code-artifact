@@ -3,14 +3,34 @@ import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { Refusal } from './refusal.js';
 import { ID_RE } from './links.js';
+import { KINDS } from './kinds.js';
 
 const SCHEMA = 1;
+const isVersionNumber = (n) => Number.isInteger(n) && n >= 1;
 const rmrf = (p) => fsp.rm(p, { recursive: true, force: true });
 
 /** `slug(title)` (at most 32 chars of [a-z0-9-]) plus a random base36 suffix. */
 export function newId(title) {
   const slug = title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+/, '').slice(0, 32).replace(/-+$/, '') || 'artifact';
   return `${slug}-${crypto.randomInt(36 ** 6).toString(36).padStart(6, '0')}`;
+}
+
+/** A reason `r` is not a well-formed record for `id`, or null. Guards every path built from a record. */
+function recordProblem(r, id) {
+  if (r === null || typeof r !== 'object' || Array.isArray(r)) return 'not an object';
+  if (r.id !== id || !ID_RE.test(r.id)) return 'id does not match its directory';
+  if (!KINDS.includes(r.kind)) return 'unknown kind';
+  if (typeof r.project !== 'string' || typeof r.title !== 'string') return 'project or title is not a string';
+  if (!Array.isArray(r.versions) || r.versions.length === 0) return 'no versions';
+  let prev = 0;
+  for (const v of r.versions) {
+    if (v === null || typeof v !== 'object' || !isVersionNumber(v.n)) return 'a version number is not a positive integer';
+    if (v.n <= prev) return 'version numbers are not ascending';
+    if (typeof v.title !== 'string' || typeof v.publishedAt !== 'string' || Number.isNaN(Date.parse(v.publishedAt))) return 'a version has no valid title or publishedAt';
+    prev = v.n;
+  }
+  if (!isVersionNumber(r.nextVersion) || r.nextVersion <= prev) return 'nextVersion does not follow the versions';
+  return null;
 }
 
 /**
@@ -22,9 +42,13 @@ export class Store {
   #chain = Promise.resolve();
   now;
 
-  constructor(root, { now = () => new Date() } = {}) {
+  #moveIntoPlace;
+
+  // `moveIntoPlace` is a test seam: the step that makes staged content a version directory.
+  constructor(root, { now = () => new Date(), moveIntoPlace = (from, to) => fsp.rename(from, to) } = {}) {
     this.#root = root;
     this.now = now;
+    this.#moveIntoPlace = moveIntoPlace;
   }
 
   /** Creates the layout and sweeps what a crash can leave behind. */
@@ -36,7 +60,10 @@ export class Store {
   }
 
   #artifactDir = (id) => path.join(this.#root, 'artifacts', id);
-  versionDir = (id, n) => path.join(this.#artifactDir(id), 'v', String(n));
+  versionDir = (id, n) => {
+    if (!ID_RE.test(id) || !isVersionNumber(n)) throw new Error(`invalid artifact or version: ${id} v${n}`);
+    return path.join(this.#artifactDir(id), 'v', String(n));
+  };
 
   #lock(fn) {
     const run = this.#chain.then(fn);
@@ -50,24 +77,16 @@ export class Store {
       for (const name of await fsp.readdir(dir)) await rmrf(path.join(dir, name));
     }
     const artifacts = path.join(this.#root, 'artifacts');
-    for (const id of await fsp.readdir(artifacts)) {
-      const dir = path.join(artifacts, id);
-      let text;
-      try {
-        text = await fsp.readFile(path.join(dir, 'artifact.json'), 'utf8');
-      } catch (e) {
-        if (e.code !== 'ENOENT') throw e;
+    for (const entry of await fsp.readdir(artifacts, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      const dir = path.join(artifacts, entry.name);
+      const loaded = await this.#load(entry.name);
+      if (loaded.status === 'missing') {
         await rmrf(dir); // a crash mid-create
         continue;
       }
-      let record;
-      try {
-        record = JSON.parse(text);
-      } catch (e) {
-        console.error(`code-artifact: corrupt artifact.json for ${id} (left in place): ${e.message}`);
-        continue;
-      }
-      const listed = new Set((record.versions ?? []).map((v) => String(v.n)));
+      if (loaded.status !== 'ok') continue;
+      const listed = new Set(loaded.record.versions.map((v) => String(v.n)));
       let onDisk = [];
       try {
         onDisk = await fsp.readdir(path.join(dir, 'v'));
@@ -76,6 +95,31 @@ export class Store {
       }
       for (const n of onDisk) if (!listed.has(n)) await rmrf(path.join(dir, 'v', n));
     }
+  }
+
+  /** Reads and validates a record: `{status:'ok', record}`, `{status:'missing'}` or `{status:'corrupt'}` (logged, never deleted). */
+  async #load(id) {
+    let text;
+    try {
+      text = await fsp.readFile(path.join(this.#artifactDir(id), 'artifact.json'), 'utf8');
+    } catch (e) {
+      if (e.code === 'ENOENT' || e.code === 'ENOTDIR') return { status: 'missing' };
+      console.error(`code-artifact: cannot read artifact ${id} (left in place): ${e.message}`);
+      return { status: 'corrupt' };
+    }
+    let record;
+    try {
+      record = JSON.parse(text);
+    } catch (e) {
+      console.error(`code-artifact: corrupt artifact.json for ${id} (left in place): ${e.message}`);
+      return { status: 'corrupt' };
+    }
+    const problem = recordProblem(record, id);
+    if (problem) {
+      console.error(`code-artifact: malformed artifact.json for ${id} (left in place): ${problem}`);
+      return { status: 'corrupt' };
+    }
+    return { status: 'ok', record };
   }
 
   /** A fresh scratch dir for ingest; `create`/`addVersion` rename it into place. */
@@ -90,15 +134,11 @@ export class Store {
     await fsp.rename(tmp, path.join(dir, 'artifact.json'));
   }
 
-  /** The record for `id`, or null when it is unknown (or corrupt, which is logged). */
+  /** The record for `id`, or null when it is unknown or corrupt (which is logged). */
   async get(id) {
     if (!ID_RE.test(id)) return null;
-    try {
-      return JSON.parse(await fsp.readFile(path.join(this.#artifactDir(id), 'artifact.json'), 'utf8'));
-    } catch (e) {
-      if (e.code !== 'ENOENT') console.error(`code-artifact: cannot read artifact ${id}: ${e.message}`);
-      return null;
-    }
+    const loaded = await this.#load(id);
+    return loaded.status === 'ok' ? loaded.record : null;
   }
 
   /** Every readable artifact, newest latest-version first. Corrupt records are logged and skipped. */
@@ -126,7 +166,7 @@ export class Store {
         versions: [{ n: 1, title, publishedAt: at, ...version }],
       };
       await fsp.mkdir(path.join(this.#artifactDir(id), 'v'), { recursive: true });
-      await fsp.rename(staging, this.versionDir(id, 1));
+      await this.#moveIntoPlace(staging, this.versionDir(id, 1));
       await this.#write(record);
       return record;
     });
@@ -139,7 +179,7 @@ export class Store {
       if (!record) throw new Refusal('ARTIFACT_UNKNOWN', `no artifact ${id}`);
       const n = record.nextVersion;
       const t = title ?? record.title;
-      await fsp.rename(staging, this.versionDir(id, n));
+      await this.#moveIntoPlace(staging, this.versionDir(id, n));
       const next = {
         ...record, title: t, nextVersion: n + 1,
         versions: [...record.versions, { n, title: t, publishedAt: this.now().toISOString(), ...version }],

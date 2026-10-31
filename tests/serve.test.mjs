@@ -104,7 +104,9 @@ test('static responses carry no plugin CSP but keep nosniff; pages and the API k
   const md = await publish(app, { path: await fixtureFile(t, 'a.md', '# hi'), title: 'Doc' });
   assert.match((await app.get(`/a/${md.id}/`)).headers.get('content-security-policy'), /default-src 'none'/);
   assert.match((await app.get('/api/health')).headers.get('content-security-policy'), /default-src 'none'/);
-  assert.match((await app.get(`/a/${art.id}/missing`)).headers.get('content-security-policy') ?? '', /default-src 'none'|^$/);
+  const miss = await app.get(`/a/${art.id}/missing`);
+  assert.equal(miss.status, 404);
+  assert.match(miss.headers.get('content-security-policy'), /default-src 'none'/, 'a 404 under a static site still carries the CSP');
 });
 
 test('a lone html file serves as the site root', async (t) => {

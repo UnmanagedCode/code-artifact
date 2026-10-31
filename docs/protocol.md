@@ -62,7 +62,7 @@ Interface contracts. Everything is relative to the plugin root; cc mounts it at 
 | `GET api/health` | `{ok:true}` |
 | `POST api/mcp` | The MCP envelope above |
 | `GET api/artifacts?project=&kind=` | `{artifacts:[record + link + versionLink per version]}`, newest first |
-| `GET api/artifacts/:id` | One record |
+| `GET api/artifacts/:id` | One record plus `link` and a `versionLink` per version |
 | `DELETE api/artifacts/:id` | `{deleted:"artifact", id}` |
 | `DELETE api/artifacts/:id/versions/:n` | `{deleted:"version", …}` |
 | `POST api/prune` `{olderThanDays, project?, dryRun?}` | `{versions:[{id, version}], artifacts}`; never includes a latest version |

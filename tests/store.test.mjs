@@ -184,3 +184,94 @@ test('get answers null for an id that fails the id format, without touching the 
   assert.equal(await store.get('../x'), null);
   assert.equal(await store.get('A'), null);
 });
+
+const writeRecord = (root, id, mutate) => async () => {
+  const file = path.join(root, 'artifacts', id, 'artifact.json');
+  const rec = JSON.parse(await fsp.readFile(file, 'utf8'));
+  mutate(rec);
+  await fsp.writeFile(file, JSON.stringify(rec));
+  return file;
+};
+
+test('versionDir refuses a version number that is not a positive integer, and an id that is not an id', async (t) => {
+  const { store } = await openStore(t);
+  for (const n of ['../../x', '1', 0, -1, 1.5, NaN, undefined]) assert.throws(() => store.versionDir('a-b', n), /invalid/, String(n));
+  assert.throws(() => store.versionDir('../x', 1), /invalid/);
+  assert.match(store.versionDir('a-b', 3), /artifacts\/a-b\/v\/3$/);
+});
+
+test('a record whose version number is a path never reaches the disk: it is corrupt, out of get/list/prune, and untouched', async (t) => {
+  const { store, root } = await openStore(t);
+  const victim = path.join(path.dirname(root), 'victim');
+  await fsp.mkdir(victim);
+  await fsp.writeFile(path.join(victim, 'keep.txt'), 'keep');
+  const r = await create(store);
+  await add(store, r.id);
+  const file = await writeRecord(root, r.id, (rec) => { rec.versions[0].n = '../../../../victim'; })();
+  const before = await fsp.readFile(file, 'utf8');
+  t.mock.method(console, 'error', () => {});
+  const reopened = await Store.open(root, { now: () => new Date(Date.now() + 400 * 86_400_000) });
+  assert.equal(await reopened.get(r.id), null);
+  assert.deepEqual(await reopened.list(), []);
+  assert.deepEqual(await reopened.prune({ olderThanDays: 1 }), { versions: [], artifacts: 0 });
+  assert.equal(await fsp.readFile(path.join(victim, 'keep.txt'), 'utf8'), 'keep');
+  assert.equal(await fsp.readFile(file, 'utf8'), before, 'the record is never deleted or rewritten');
+});
+
+test('every malformed record shape is logged, left on disk, and excluded from get and list', async (t) => {
+  const { store, root } = await openStore(t);
+  const shapes = {
+    'no versions': (rec) => { rec.versions = []; },
+    'version without publishedAt': (rec) => { delete rec.versions[0].publishedAt; },
+    'unparseable publishedAt': (rec) => { rec.versions[0].publishedAt = 'yesterday'; },
+    'id does not match its directory': (rec) => { rec.id = 'someone-else'; },
+    'id breaks the id format': (rec) => { rec.id = '../x'; },
+    'unknown kind': (rec) => { rec.kind = 'weird'; },
+    'versions not ascending': (rec) => { rec.versions.push({ ...rec.versions[0], n: 1 }); },
+    'nextVersion behind the versions': (rec) => { rec.nextVersion = 1; },
+    'not an object': () => 'null',
+  };
+  const good = await create(store, 'Good');
+  const errors = [];
+  t.mock.method(console, 'error', (...a) => errors.push(a.join(' ')));
+  for (const [name, mutate] of Object.entries(shapes)) {
+    const rec = await create(store, name.slice(0, 20));
+    const file = path.join(root, 'artifacts', rec.id, 'artifact.json');
+    if (name === 'not an object') await fsp.writeFile(file, 'null');
+    else await writeRecord(root, rec.id, mutate)();
+    const before = await fsp.readFile(file, 'utf8');
+    assert.equal(await store.get(rec.id), null, name);
+    assert.ok((await store.list()).every((r) => r.id === good.id || r.id !== rec.id), name);
+    assert.ok(errors.some((e) => e.includes(rec.id)), `${name} was logged`);
+    assert.equal(await fsp.readFile(file, 'utf8'), before, `${name} was left in place`);
+  }
+  assert.deepEqual((await store.list()).map((r) => r.id), [good.id]);
+});
+
+test('a non-directory under artifacts/ does not stop the store from opening', async (t) => {
+  const { store, root } = await openStore(t);
+  const r = await create(store);
+  await fsp.writeFile(path.join(root, 'artifacts', '.DS_Store'), 'x');
+  const reopened = await Store.open(root);
+  assert.deepEqual((await reopened.list()).map((x) => x.id), [r.id]);
+  assert.equal(await fsp.readFile(path.join(root, 'artifacts', '.DS_Store'), 'utf8'), 'x');
+});
+
+test('a failure moving content into place never leaves a durable record whose content is absent', async (t) => {
+  const root = path.join(await tmp(t), 'store');
+  let fail = true;
+  const store = await Store.open(root, { moveIntoPlace: async (from, to) => { if (fail) throw new Error('disk full'); await fsp.rename(from, to); } });
+  await assert.rejects(create(store), /disk full/);
+  const reopened = await Store.open(root);
+  assert.deepEqual(await reopened.list(), []);
+  assert.deepEqual(await fsp.readdir(path.join(root, 'artifacts')), [], 'nothing of the failed create survives');
+  fail = false;
+  const ok = await create(store);
+  fail = true;
+  await assert.rejects(add(store, ok.id), /disk full/);
+  const again = await Store.open(root);
+  const got = await again.get(ok.id);
+  assert.deepEqual(got.versions.map((v) => v.n), [1], 'the failed version is not listed');
+  assert.equal(got.nextVersion, 2);
+  for (const v of got.versions) assert.ok(await exists(again.versionDir(ok.id, v.n)), 'every listed version has its content');
+});

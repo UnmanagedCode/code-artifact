@@ -37,4 +37,4 @@ node "$CC_PROJECTS_ROOT/.plugins/code-mutant/mutate.mjs" candidates
 
 ## Verified
 
-`baseline` (without `--no-canary`) was run in copy isolation: the baseline `PASSED` with 137 passed, 0 failed, 0 skipped, and the canary `KILLED [counted grade, baseline scope]` via `tests/api.test.mjs`, exit 0. `run`, `validate` and `candidates` were not run: no catalog exists.
+`baseline` (without `--no-canary`) was run in copy isolation and exited 0. Read its result as: the baseline gate `PASSED` with the full suite's pass count and no failures or skips, and the canary gate `KILLED [counted grade, baseline scope]`. `run`, `validate` and `candidates` were not run: no catalog exists.

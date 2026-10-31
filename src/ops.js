@@ -6,6 +6,8 @@ import { stageContent } from './ingest.js';
 import { LIMITS } from './limits.js';
 import { ID_RE, deepLink } from './links.js';
 
+/** Upper bound for `olderThanDays` (about 270 years), so the cutoff is always a valid date. */
+const MAX_PRUNE_DAYS = 100_000;
 const PROJECT_RE = /^[a-zA-Z0-9._-]+$/;
 
 const bad = (msg) => new Refusal('INVALID_ARGUMENT', msg);
@@ -159,6 +161,7 @@ export function createOps({ store: storeOrGetter, cc, limits = LIMITS }) {
     async prune(args) {
       checkKeys(args, ['olderThanDays', 'project', 'dryRun']);
       const olderThanDays = int(args, 'olderThanDays', { required: true });
+      if (olderThanDays > MAX_PRUNE_DAYS) throw bad(`olderThanDays must be at most ${MAX_PRUNE_DAYS}`);
       const project = str(args, 'project', { max: 100, pattern: PROJECT_RE });
       if (args.dryRun !== undefined && typeof args.dryRun !== 'boolean') throw bad('dryRun must be a boolean');
       return getStore().prune({ olderThanDays, project, dryRun: args.dryRun === true });

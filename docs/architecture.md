@@ -37,9 +37,9 @@ Node ESM backend (Express 4) plus a React/Vite/Tailwind v4 UI, one package. Cont
 <store>/.trash/<rand>/                       artifact dirs on their way out
 ```
 
-`artifact.json`: `schema`, `id`, `kind`, `project`, `title` (current), `createdAt`, `nextVersion`, `versions[]`. A version: `n`, `title`, `publishedAt`, `sessionId`, `sessionLabel`, `source:{name,type}`, `file` (markdown/download), `bytes`, `files`.
+`artifact.json`: `schema`, `id`, `kind`, `project`, `title` (current), `createdAt`, `nextVersion`, `versions[]`. A record is validated on every read (`recordProblem` in `src/store.js`); a malformed or unparseable one is logged, left on disk, and excluded from `get`, `list` and `prune`. A version: `n`, `title`, `publishedAt`, `sessionId`, `sessionLabel`, `source:{name,type}`, `file` (markdown/download), `bytes`, `files`.
 
-- **Ids**: `slug(title)` (at most 32 chars) plus `-` and 6 random base36 characters.
+- **Ids**: a slug of the title plus a random suffix; see `newId` in `src/store.js`. Every id matches `ID_RE`.
 - **Version numbers** come from `nextVersion` and are never reused. Latest is the last remaining entry (the highest `n`).
 - **Write order** (crash safety): stage in `.staging/`, rename to `v/<n>`, then write `artifact.json` via a temp file and rename.
 - **Delete**: the version leaves `artifact.json` first, then its directory is removed; a whole artifact is renamed into `.trash/` then removed.
@@ -50,7 +50,7 @@ Node ESM backend (Express 4) plus a React/Vite/Tailwind v4 UI, one package. Cont
 ## Ingest safety
 
 - A directory is walked with `lstat`: a symlink or any non-file, non-directory entry is `UNSAFE_ENTRY`, as is a name with a backslash. Files are copied with `COPYFILE_EXCL`.
-- A tarball goes through three passes: a listing with `tar.Parser` that allows only file and directory entries with safe paths and checks the caps (aborting early), an extraction with `strict` and a type filter, and the same walk as for directories.
+- A tarball goes through a listing, an extraction and a walk: the listing with `tar.Parser` that allows only file and directory entries with safe paths and checks the caps (aborting early); the extraction uses `strict` and a type filter; the walk is the one used for directories.
 - The sole-top-dir rule applies to tarballs only: one root entry that is a directory becomes the root.
 - Failure removes the staging dir; the source is never modified.
 - A static source with a root `v/<number>` is `RESERVED_PATH`: the pinned-version route would shadow it.
