@@ -4,7 +4,7 @@ Interface contracts. Everything is relative to the plugin root; cc mounts it at 
 
 ## Manifest
 
-`conductor.plugin.json`: `id` `code-artifact`, `pluginApi` 1, backend `npm start` (health `/api/health`, ready when stdout matches `listening`), frontend `/` labelled "Artifacts", MCP endpoint `/api/mcp`.
+`conductor.plugin.json`: `id` `code-artifact`, `pluginApi` 1, backend `npm start` (health `/api/health`, ready when stdout matches `listening`), frontend `/` labelled "Code Artifact", MCP endpoint `/api/mcp`.
 
 ## MCP wire contract
 

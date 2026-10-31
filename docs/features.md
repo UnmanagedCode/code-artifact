@@ -97,7 +97,7 @@ Every version can be downloaded from `dl/<id>/<n>`; a static or app version down
 
 ## UI
 
-The plugin's own page (nav label "Artifacts"):
+The plugin's own page (nav label "Code Artifact"):
 
 - **List**: artifacts grouped by project (projects by name, artifacts newest first). Each row shows the title, kind, latest version, relative time, the publishing session (its label as plain text, else the 8-character id, else "unknown session"), and an **Open** link. Markdown in the label is stripped and a label longer than `MAX_SESSION_LABEL` (`frontend/src/lib/artifacts.ts`) is cut to at most that many code points, backing up to the last space only when it falls past halfway, with `…` appended. The session text is constrained to its card (truncated in the list, wrapped in the detail), so a long unbroken label never widens the page. An empty state names `publish_artifact`.
 - **App rows and detail**: an app row shows a status badge. An app's detail view adds a panel with the status, **Start**, **Stop**, **Open**, the latest version's `start`, `install` and `prefix`, and the log tail (polled every second while installing or starting, else every 5 s).

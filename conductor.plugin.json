@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "pluginApi": 1,
   "backend": { "start": "npm start", "healthPath": "/api/health", "readyWhen": "listening" },
-  "frontend": { "path": "/", "navLabel": "Artifacts" },
+  "frontend": { "path": "/", "navLabel": "Code Artifact" },
   "mcp": {
     "endpoint": "/api/mcp",
     "timeoutMs": 120000,

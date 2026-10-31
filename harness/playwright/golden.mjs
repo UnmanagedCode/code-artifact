@@ -55,7 +55,7 @@ try {
 
         // List, grouped by project.
         await page.goto(world.url);
-        await page.getByRole('heading', { name: 'Artifacts', level: 1 }).waitFor();
+        await page.getByRole('heading', { name: 'Code Artifact', level: 1 }).waitFor();
         await page.getByRole('link', { name: 'Release notes' }).waitFor();
         assert.deepEqual(await page.locator('section[aria-label] > h2').allTextContents(), ['demo', 'tools']);
         assert.equal(await page.getByRole('link', { name: 'Open' }).count(), 7);
