@@ -65,3 +65,4 @@ pre.log:empty { display: none; }
 button.btn { font-family: inherit; cursor: pointer; }
 button.btn:disabled { opacity: 0.5; cursor: default; }
 [hidden] { display: none !important; }
+.bar .badge { white-space: nowrap; }
