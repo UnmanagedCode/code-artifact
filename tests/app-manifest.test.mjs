@@ -28,6 +28,8 @@ test('every invalid shape is APP_MANIFEST_INVALID', () => {
 test('an oversized or non-UTF-8 manifest is refused', () => {
   refused(`{"start":"s"}${' '.repeat(16 * 1024)}`);
   refused(Buffer.from([0x7b, 0xff, 0x7d]));
+  // Valid JSON apart from one invalid byte inside a string: only strict decoding refuses it.
+  refused(Buffer.concat([Buffer.from('{"start":"a'), Buffer.from([0xff]), Buffer.from('b"}')]));
 });
 
 test('a dir or a tarball (even under a sole top dir) with a root artifact.json is an app; the manifest is kept on the version', async (t) => {

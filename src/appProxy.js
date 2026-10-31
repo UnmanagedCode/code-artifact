@@ -2,7 +2,7 @@ import http from 'node:http';
 import net from 'node:net';
 import { ID_RE } from './links.js';
 import { plain, wrap } from './http.js';
-import { forwardHeaders, rewriteLocation, rewriteSetCookie, upstreamPath } from './appRewrite.js';
+import { forwardHeaders, rewriteLocation, rewriteSetCookie, selfOrigins, upstreamPath } from './appRewrite.js';
 
 const HOP_BY_HOP = new Set(['connection', 'keep-alive', 'proxy-authenticate', 'proxy-authorization', 'te', 'trailer', 'transfer-encoding', 'upgrade']);
 
@@ -41,9 +41,7 @@ export function appProxyRouter(apps) {
     if (!target) return plain(res, await refusalStatus(apps, id));
 
     const { path, headers } = upstreamRequest(req, target);
-    const forwardedHost = (req.headers['x-forwarded-host'] ?? req.headers.host) ?? '';
-    const proto = req.headers['x-forwarded-proto'] ?? 'http';
-    const upstreamOrigins = [`http://127.0.0.1:${target.port}`, `http://localhost:${target.port}`, `http://[::1]:${target.port}`, `${proto}://${forwardedHost}`];
+    const upstreamOrigins = selfOrigins(target.port, req.headers['x-forwarded-host'] ?? req.headers.host);
     const locate = { basePath: target.basePath, mount: target.mount, id, upstreamOrigins };
 
     const up = http.request({ host: target.host, port: target.port, method: req.method, path, headers }, (ures) => {
@@ -78,7 +76,7 @@ export function appProxyRouter(apps) {
 }
 
 const refuseUpgrade = (socket, status) => {
-  socket.end(`HTTP/1.1 ${status} ${http.STATUS_CODES[status]}\r\nConnection: close\r\n\r\n`);
+  socket.end(`HTTP/1.1 ${status} ${http.STATUS_CODES[status]}\r\nConnection: close\r\n\r\n`, () => socket.destroy());
 };
 
 /** The `upgrade` listener: pipes a WebSocket upgrade for `/app/<id>/…` raw to the running app; anything else is refused and closed. */
@@ -95,9 +93,12 @@ export function appUpgrade(apps) {
       return refuseUpgrade(socket, 503);
     }
     const { path, headers } = upstreamRequest(req, target);
-    const up = net.connect(target.port, target.host);
-    const closeBoth = () => { up.destroy(); socket.destroy(); };
+    let up = null;
+    const closeBoth = () => { up?.destroy(); socket.destroy(); };
+    socket.once('close', closeBoth); // before connecting: a client that leaves mid-connect must not leak the upstream socket
+    up = net.connect(target.port, target.host);
     up.once('connect', () => {
+      if (socket.destroyed) return up.destroy();
       let lines = `${req.method} ${path} HTTP/${req.httpVersion}\r\n`;
       for (let i = 0; i < headers.length; i += 2) lines += `${headers[i]}: ${headers[i + 1]}\r\n`;
       up.write(`${lines}\r\n`);
@@ -105,7 +106,7 @@ export function appUpgrade(apps) {
       up.pipe(socket);
       socket.pipe(up);
       up.once('close', closeBoth);
-      socket.once('close', closeBoth);
+      return undefined;
     });
     up.once('error', () => {
       if (up.connecting) { // never reached the app: the client gets a 502, then the pair goes

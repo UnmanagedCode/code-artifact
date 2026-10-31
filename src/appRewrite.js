@@ -26,6 +26,15 @@ export function forwardHeaders(rawHeaders, { upstreamHost, basePath, remoteAddre
   return out;
 }
 
+/**
+ * The origins an app may name itself by: its own address and the host the client used, under either scheme
+ * (cc forwards `X-Forwarded-Proto: http` even behind an https share, so the scheme cannot be trusted).
+ */
+export function selfOrigins(port, forwardedHost) {
+  const own = [`http://127.0.0.1:${port}`, `http://localhost:${port}`, `http://[::1]:${port}`];
+  return forwardedHost ? [...own, `http://${forwardedHost}`, `https://${forwardedHost}`] : own;
+}
+
 const ABSOLUTE = /^[a-z][a-z0-9+.-]*:/i;
 
 /**
@@ -52,7 +61,8 @@ export function rewriteLocation(value, { basePath, mount, id, upstreamOrigins })
 /** A `Set-Cookie` whose `Path` is confined to `basePath`, so an app cannot shadow cc's or a share's cookies. */
 export function rewriteSetCookie(value, { basePath }) {
   const parts = value.split(';');
-  return parts.map((part) => {
+  return parts.map((part, i) => {
+    if (i === 0) return part; // the cookie's own name=value, which may itself be called "path"
     const m = /^(\s*)path\s*=\s*(.*?)\s*$/i.exec(part);
     if (!m || !m[2].startsWith('/')) return part;
     const v = m[2];

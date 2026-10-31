@@ -34,9 +34,11 @@ A dynamic app is a directory or `.tar.gz` with a root `artifact.json`. code-arti
 
 Environment of `install` and `start`: the backend's environment plus `BASE_PATH` (`/plugins/code-artifact/app/<id>`, no trailing slash), `DATA_DIR` (`artifacts/<id>/data/` in the store; created on Start, survives updates, removed with the artifact) and, for `start` only, `PORT` (a free loopback port).
 
-**Which path the app sees.** The app is served same-origin under `app/<id>/` through the plugin's reverse proxy, so it works inside cc and behind a code-hub share of cc.
+**Which path the app sees.** The app is served same-origin under `app/<id>/` through the plugin's reverse proxy, so it works inside cc and behind a code-hub share of cc. `BASE_PATH` (`/plugins/code-artifact/app/<id>`) is only the URL path when cc mounts the plugin; in a standalone `npm start` run the proxy is at `/app/<id>/…`, so a `keep` app's `BASE_PATH` links do not resolve there.
 - `strip` forwards `/x` for `app/<id>/x`. Right for hand-written servers: use relative links, or prefix root-absolute ones with `$BASE_PATH`.
 - `keep` forwards `$BASE_PATH/x`. Needed by frameworks that mount under their base themselves (Vite dev, Next `basePath`, SvelteKit, Astro); Vite's HMR WebSocket is accepted only under its `base`.
+
+**Host and Origin.** The proxy sets `Host` to the app's own address (`127.0.0.1:<port>`; Vite 6 rejects unknown hosts), while the browser's `Origin` is cc's or the share's. A framework that compares `Origin` with `Host` for CSRF (Django, Rails) must be told to trust `X-Forwarded-Host`, which carries the original host.
 
 Worked example, `strip`: `artifact.json` is `{"start": "node server.js"}` and `server.js` is
 

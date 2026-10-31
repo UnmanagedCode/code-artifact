@@ -2,8 +2,8 @@
 // behaviour in both prefix modes — HTTP, bodies, headers, redirects, cookies, and WebSocket upgrades.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { forwardHeaders, rewriteLocation, rewriteSetCookie, upstreamPath } from '../src/appRewrite.js';
-import { echoOnce, publishApp, rawUpgrade, runApp, socketClosed, startApps } from './_apps.mjs';
+import { forwardHeaders, rewriteLocation, rewriteSetCookie, selfOrigins, upstreamPath } from '../src/appRewrite.js';
+import { echoOnce, publishApp, rawUpgrade, runApp, socketClosed, startApps, waitFor } from './_apps.mjs';
 import { fixtureDir, publish } from './_helpers.mjs';
 
 const MOUNT = '/plugins/code-artifact';
@@ -53,6 +53,13 @@ test('rewriteLocation: relative and external values pass; the app\'s own origin 
   for (const [input, want] of table) assert.equal(loc(input), want, input);
 });
 
+test('selfOrigins names the app and the client\'s host under both schemes', () => {
+  assert.deepEqual(selfOrigins(5000, 'share.example'), [
+    'http://127.0.0.1:5000', 'http://localhost:5000', 'http://[::1]:5000', 'http://share.example', 'https://share.example',
+  ]);
+  assert.equal(selfOrigins(5000, undefined).length, 3);
+});
+
 const cookie = (value) => rewriteSetCookie(value, { basePath: BASE });
 
 test('rewriteSetCookie confines Path to the base path and leaves everything else alone', () => {
@@ -67,6 +74,7 @@ test('rewriteSetCookie confines Path to the base path and leaves everything else
     ['a=1', 'a=1'],
     ['a=1; Domain=x.example; Path=/; Secure; SameSite=Lax', `a=1; Domain=x.example; Path=${BASE}/; Secure; SameSite=Lax`],
     ['a=1; Path=relative', 'a=1; Path=relative'],
+    ['path=/v', 'path=/v'], ['Path=/v; Path=/w', `Path=/v; Path=${BASE}/w`], ['path=/v; HttpOnly', 'path=/v; HttpOnly'],
   ];
   for (const [input, want] of table) assert.equal(cookie(input), want, input);
 });
@@ -161,6 +169,14 @@ test('an app\'s redirects and cookies are rewritten into its URL space end to en
   assert.equal(await redirect('next'), 'next');
   assert.equal(await redirect('https://other.example/p'), 'https://other.example/p');
 
+  // Behind an https share cc still forwards X-Forwarded-Proto: http, so the app's https self-link must still be recognised.
+  const behindShare = (to) => fetch(`${app.base}/app/${pub.id}/redirect?to=${encodeURIComponent(to)}`, {
+    redirect: 'manual', headers: { 'x-forwarded-host': 'share.example', 'x-forwarded-proto': 'http' },
+  }).then((r) => r.headers.get('location'));
+  assert.equal(await behindShare('https://share.example/x?y=1'), `/app/${pub.id}/x?y=1`);
+  assert.equal(await behindShare('http://share.example/x'), `/app/${pub.id}/x`);
+  assert.equal(await behindShare('https://other.example/x'), 'https://other.example/x');
+
   const query = ['a=1; Path=/', `b=2; Path=${base}/sub`, 'c=3'].map((c) => `c=${encodeURIComponent(c)}`).join('&');
   const res = await fetch(`${app.base}/app/${pub.id}/cookies?${query}`);
   assert.deepEqual(res.headers.getSetCookie(), [`a=1; Path=${base}/`, `b=2; Path=${base}/sub`, 'c=3']);
@@ -195,12 +211,25 @@ test('an upgrade to a stopped app is 503, one outside /app/ is 404, and the conn
   assert.equal((await rawUpgrade(app.base, '/app/nope-abc123/ws')).status, 404);
 });
 
-test('closing the client end of an upgraded socket closes the app end', async (t) => {
+test('closing the client end of an upgraded socket closes the app\'s end of it', async (t) => {
+  const app = await startApps(t);
+  const pub = await publishApp(t, app);
+  await runApp(app, pub.id);
+  const open = async () => (await (await fetch(`${app.base}/app/${pub.id}/ws-open`)).json()).open;
+  assert.equal(await open(), 0);
+  const up = await rawUpgrade(app.base, `/app/${pub.id}/ws`);
+  assert.equal(await echoOnce(up.socket, 'a'), 'a');
+  assert.equal(await open(), 1, 'the app holds the upgraded connection');
+  up.socket.destroy();
+  await waitFor(async () => (await open()) === 0, { what: 'the app to see its end close' });
+});
+
+test('an app that closes its end of an upgraded socket closes the client\'s', async (t) => {
   const app = await startApps(t);
   const pub = await publishApp(t, app);
   await runApp(app, pub.id);
   const up = await rawUpgrade(app.base, `/app/${pub.id}/ws`);
-  assert.equal(await echoOnce(up.socket, 'a'), 'a');
-  up.socket.destroy();
+  await echoOnce(up.socket, 'a');
+  await app.post(`/api/apps/${pub.id}/stop`, {});
   await socketClosed(up.socket);
 });

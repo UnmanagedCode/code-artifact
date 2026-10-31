@@ -170,15 +170,18 @@ test('a second Start moves the previous run\'s log to app.log.1', async (t) => {
   assert.match(previous, /\[code-artifact\] stopped/);
 });
 
-test('a running log over the cap is rotated, keeping its tail in app.log.1', async (t) => {
+test('a running log over the cap is rotated: app.log.1 holds the newest bytes and app.log is truncated', async (t) => {
   const app = await startApps(t);
   const pub = await publishApp(t, app);
   await runApp(app, pub.id);
-  await fetch(`${app.base}/app/${pub.id}/spam?bytes=20000`);
-  const rotated = path.join(dirOf(app, pub.id), 'app.log.1');
-  await waitFor(() => fsp.stat(rotated).then((s) => s.size > 0, () => false), { what: 'log rotation' });
-  assert.ok((await fsp.stat(rotated)).size <= 4096, 'at most the cap is kept');
-  assert.ok((await fsp.stat(path.join(dirOf(app, pub.id), 'app.log'))).size <= 4096 + 200);
+  await fetch(`${app.base}/app/${pub.id}/spam?lines=2500`);
+  const log = path.join(dirOf(app, pub.id), 'app.log');
+  const rotated = `${log}.1`;
+  // Rotation is done once .1 holds the cap's worth of bytes and app.log has been truncated after it.
+  await waitFor(async () => (await fsp.stat(rotated).then((s) => s.size, () => 0)) === 4096 && (await fsp.stat(log)).size <= 4096, { what: 'log rotation' });
+  const kept = await fsp.readFile(rotated, 'utf8');
+  assert.match(kept, /line-02500\nEND\n$/, 'the tail is kept');
+  assert.doesNotMatch(kept, /line-00001\n/, 'the head is dropped');
 });
 
 test('the mount comes from createServer, not from a request: BASE_PATH follows it', async (t) => {
@@ -186,4 +189,55 @@ test('the mount comes from createServer, not from a request: BASE_PATH follows i
   const pub = await publishApp(t, app);
   await runApp(app, pub.id);
   assert.equal((await echo(app, pub.id)).env.BASE_PATH, `/mnt/x/app/${pub.id}`);
+});
+
+test('an installed marker without its working copy is not trusted: Start copies and installs again', async (t) => {
+  const app = await startApps(t);
+  const pub = await publishApp(t, app, { manifest: { start: 'node server.js', install: 'echo x >> "$DATA_DIR/installs"' } });
+  await runApp(app, pub.id);
+  await app.post(`/api/apps/${pub.id}/stop`, {});
+  const version = path.join(dirOf(app, pub.id), 'v', '1');
+  await fsp.rm(path.join(version, 'run'), { recursive: true });
+  await fsp.access(path.join(version, 'installed'));
+  const again = await app.post(`/api/apps/${pub.id}/start`, {});
+  assert.equal(again.data.status, 'installing');
+  await waitStatus(app, pub.id, 'running');
+  assert.equal((await echo(app, pub.id)).installs, 2);
+});
+
+test('an interrupted reinstall leaves no marker, so the next Start installs again', async (t) => {
+  const app = await startApps(t);
+  const install = 'if [ -e "$DATA_DIR/hang" ]; then sleep 300; fi; echo x >> "$DATA_DIR/installs"';
+  const pub = await publishApp(t, app, { manifest: { start: 'node server.js', install } });
+  await runApp(app, pub.id);
+  await app.post(`/api/apps/${pub.id}/stop`, {});
+  const version = path.join(dirOf(app, pub.id), 'v', '1');
+  await fsp.rm(path.join(version, 'run'), { recursive: true });
+  await fsp.writeFile(path.join(dirOf(app, pub.id), 'data', 'hang'), '');
+
+  await app.post(`/api/apps/${pub.id}/start`, {});
+  await waitFor(async () => (await markerPids(app.storeDir)).length > 0, { what: 'the reinstall to run' });
+  await app.post(`/api/apps/${pub.id}/stop`, {});
+  await assert.rejects(fsp.access(path.join(version, 'installed')), 'the stale marker went before the copy did');
+
+  await fsp.rm(path.join(dirOf(app, pub.id), 'data', 'hang'));
+  const again = await app.post(`/api/apps/${pub.id}/start`, {});
+  assert.equal(again.data.status, 'installing', 'a partial working copy is not an installed one');
+  await waitStatus(app, pub.id, 'running');
+  assert.equal((await echo(app, pub.id)).installs, 2);
+});
+
+test('Stop also kills a descendant that left the process group, found by the run marker', async (t) => {
+  const app = await startApps(t);
+  const pub = await publishApp(t, app);
+  await runApp(app, pub.id);
+  await fetch(`${app.base}/app/${pub.id}/escape`);
+  const escaped = await recordedPid(app.storeDir, pub.id, 'escaped.pid');
+  const leader = await recordedPid(app.storeDir, pub.id);
+  const stat = await fsp.readFile(`/proc/${escaped}/stat`, 'utf8');
+  const pgrp = Number(stat.slice(stat.lastIndexOf(')') + 2).split(' ')[2]);
+  assert.notEqual(pgrp, leader, 'it is in a group of its own');
+  await app.post(`/api/apps/${pub.id}/stop`, {});
+  await pidGone(escaped);
+  assert.deepEqual(await markerPids(app.storeDir), []);
 });

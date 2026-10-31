@@ -115,6 +115,7 @@ export function createAppHost({ store: storeOrGetter, storeDir = null, mount = M
     const marker = st.installedMarker(id, n);
     await fsp.mkdir(st.dataDir(id), { recursive: true });
     if (!installed) {
+      await rmrf(marker); // first: a marker must always imply a complete run/
       await rmrf(run);
       await fsp.cp(path.join(st.versionDir(id, n), CONTENT), run, { recursive: true, mode: fs.constants.COPYFILE_FICLONE });
       if (!alive(id, s)) return;
@@ -179,23 +180,35 @@ export function createAppHost({ store: storeOrGetter, storeDir = null, mount = M
       marker, prefix: version.app.prefix, basePath: appBasePath(id, mount),
     };
     s.logFd = await openRunLog(st.logFile(id));
+    // Checked in the same synchronous step as states.set: shutdown() snapshots states after setting `closed`,
+    // so a run is either in that snapshot or refused here, and nothing spawns after shutdown resolves.
+    if (closed) {
+      fs.closeSync(s.logFd);
+      throw new Error('the app host is shut down');
+    }
+    states.set(id, s);
     s.logTimer = setInterval(() => { rotateIfOver(st.logFile(id), t.logCapBytes).catch(() => {}); }, t.logCheckMs);
     s.logTimer.unref();
-    states.set(id, s);
     s.launching = launch(id, s, version, installed).catch((e) => fail(id, s, `internal error: ${e.message}`));
     return publicStatus(s);
   }
 
-  /** Stops an active run and waits for its processes to be gone; `grace` bounds the SIGTERM wait. */
-  async function halt(id, s, grace) {
+  /**
+   * Stops an active run and waits for its processes to be gone; `grace` bounds the SIGTERM wait.
+   * `sweep: false` leaves the marker sweep to the caller. The run always ends `stopped`, even if a step throws.
+   */
+  async function halt(id, s, grace, { sweep = true } = {}) {
     s.stopping = true;
-    if (s.pgid) await killGroup(s.pgid, grace);
-    await s.launching;
-    if (s.pgid) await killGroup(s.pgid, grace);
-    if (HAS_PROC && storeDir) await reapMarked(await storeReal(), id, grace);
-    await logNote(id, 'stopped');
-    release(s);
-    states.set(id, { status: 'stopped', version: null, error: null, since: new Date().toISOString() });
+    try {
+      if (s.pgid) await killGroup(s.pgid, grace);
+      await s.launching;
+      if (s.pgid) await killGroup(s.pgid, grace);
+      if (sweep && HAS_PROC && storeDir) await reapMarked(await storeReal(), id, grace);
+      await logNote(id, 'stopped');
+    } finally {
+      release(s);
+      states.set(id, { status: 'stopped', version: null, error: null, since: new Date().toISOString() });
+    }
   }
 
   async function stopLocked(id) {
@@ -226,10 +239,13 @@ export function createAppHost({ store: storeOrGetter, storeDir = null, mount = M
       return startLocked(id);
     }),
 
-    /** Runs `fn` under the id's lock, first stopping the app: always for `'any'`, or only when it runs version `stopVersion`. */
-    exclusive: (id, fn, { stopVersion = 'any' } = {}) => locked(id, async () => {
+    /**
+     * Runs `fn` under the id's lock, first stopping the app: always for `'any'`, or only when it runs version
+     * `stopVersion` and `precondition` (evaluated under the lock) holds.
+     */
+    exclusive: (id, fn, { stopVersion = 'any', precondition = async () => true } = {}) => locked(id, async () => {
       const s = states.get(id);
-      if (s && (stopVersion === 'any' || s.version === stopVersion)) await stopLocked(id);
+      if (s && (stopVersion === 'any' || s.version === stopVersion) && (await precondition())) await stopLocked(id);
       const result = await fn();
       if (stopVersion === 'any') states.delete(id);
       return result;
@@ -260,12 +276,17 @@ export function createAppHost({ store: storeOrGetter, storeDir = null, mount = M
       if (n > 0) console.warn(`code-artifact: reaped ${n} orphaned app process(es)`);
     },
 
-    /** Stops every app within `shutdownGraceMs`; the backend is going away. */
+    /**
+     * Stops every app; the backend is going away. After it resolves nothing is spawned and nothing marked runs.
+     * Time: `shutdownGraceMs` for every group in parallel, up to 1 s more for a SIGKILLed group to vanish,
+     * then a marker sweep for escaped descendants that sends SIGKILL at once (up to 1 s more).
+     */
     async shutdown() {
       closed = true;
       const active = [...states].filter(([, s]) => isActive(s));
-      await Promise.all(active.map(([id, s]) => halt(id, s, t.shutdownGraceMs).catch((e) => console.error(`code-artifact: stopping ${id} failed:`, e))));
-      if (storeDir && HAS_PROC) await reapMarked(await storeReal(), undefined, t.shutdownGraceMs);
+      await Promise.all(active.map(([id, s]) => halt(id, s, t.shutdownGraceMs, { sweep: false })
+        .catch((e) => console.error(`code-artifact: stopping ${id} failed:`, e))));
+      if (storeDir && HAS_PROC) await reapMarked(await storeReal(), undefined, 0);
     },
   };
 }

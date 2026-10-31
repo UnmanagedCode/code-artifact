@@ -58,6 +58,16 @@ test('a failed app shows its error, escaped, and offers Start again', async (t) 
   assert.match(text, /data-role="start"/);
 });
 
+test('the wrapper has a bar-level alert region for a refused Start or Stop, hidden until needed', async (t) => {
+  const app = await startApps(t);
+  const pub = await publishApp(t, app);
+  for (const run of [false, true]) {
+    if (run) await runApp(app, pub.id);
+    const { text } = await page(app, `/a/${pub.id}/`);
+    assert.match(text, /<p[^>]*data-role="action-error"[^>]*role="alert"[^>]*hidden/, `running=${run}`);
+  }
+});
+
 test('a pinned link to the latest version runs like latest, badged pinned', async (t) => {
   const app = await startApps(t);
   const pub = await publishApp(t, app);

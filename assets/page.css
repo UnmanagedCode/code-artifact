@@ -66,3 +66,4 @@ button.btn { font-family: inherit; cursor: pointer; }
 button.btn:disabled { opacity: 0.5; cursor: default; }
 [hidden] { display: none !important; }
 .bar .badge { white-space: nowrap; }
+.bar-error { flex: none; margin: 0; padding: 0.375rem 0.75rem; border-bottom: 1px solid var(--destructive); color: var(--destructive); font-size: 0.875rem; overflow-wrap: anywhere; }

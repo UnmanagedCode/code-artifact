@@ -77,3 +77,17 @@ test('SIGTERM to the backend stops its apps and exits 0', async (t) => {
   assert.deepEqual(await markerPids(storeDir), []);
   await fsp.access(storeDir);
 });
+
+for (const delay of [0, 2, 6, 12]) {
+  test(`start() racing shutdown() (shutdown after ${delay} ms) leaves no marked process after shutdown resolves`, async (t) => {
+    const a = await startApps(t);
+    const pub = await publishApp(t, a, { manifest: { start: 'node server.js', install: 'sleep 300' } });
+    const started = a.server.apps.start(pub.id).then(() => 'started', () => 'refused');
+    await new Promise((r) => setTimeout(r, delay));
+    await a.server.apps.shutdown();
+    assert.deepEqual(await markerPids(a.storeDir), [], 'nothing runs once shutdown() has resolved');
+    await started;
+    assert.deepEqual(await markerPids(a.storeDir), [], 'and nothing is spawned after it either');
+    assert.equal(await a.server.apps.start(pub.id).catch(() => 'refused'), 'refused', 'a closed host refuses new starts');
+  });
+}

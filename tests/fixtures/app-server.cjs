@@ -49,8 +49,19 @@ const server = http.createServer((req, res) => {
     return json({ pid: child.pid });
   }
   if (p === '/spam') {
-    process.stdout.write('x'.repeat(Number(u.searchParams.get('bytes'))) + '\n');
+    // Numbered lines then END, so a test can tell the newest bytes from the oldest.
+    let out = '';
+    for (let i = 1; i <= Number(u.searchParams.get('lines')); i++) out += `line-${String(i).padStart(5, '0')}\n`;
+    process.stdout.write(`${out}END\n`);
     return json({ ok: true });
+  }
+  if (p === '/ws-open') return json({ open: upgraded.size });
+  if (p === '/escape') {
+    // A descendant that leaves the process group, so only the run marker in its environment can find it.
+    const child = cp.spawn('sleep', ['300'], { stdio: 'ignore', detached: true });
+    child.unref();
+    fs.writeFileSync(data('escaped.pid'), String(child.pid));
+    return json({ pid: child.pid });
   }
   if (p === '/write-cwd') {
     fs.writeFileSync('written-by-app.txt', 'x');
@@ -60,12 +71,16 @@ const server = http.createServer((req, res) => {
   return res.end(`<!doctype html><title>fixture</title><h1 id="hello">fixture v${version}</h1><p>${req.url}</p>`);
 });
 
+const upgraded = new Set();
 server.on('upgrade', (req, socket) => {
+  upgraded.add(socket);
+  socket.on('close', () => upgraded.delete(socket));
   socket.write([
     'HTTP/1.1 101 Switching Protocols', 'Connection: Upgrade', 'Upgrade: fixture',
     `X-Seen-Url: ${req.url}`, `X-Seen-Host: ${req.headers.host}`, `X-Seen-Prefix: ${req.headers['x-forwarded-prefix'] || ''}`, '', '',
   ].join('\r\n'));
   socket.on('data', (d) => socket.write(d));
+  socket.on('end', () => socket.end()); // an http-server socket is half-open: a real ws server closes on the peer's FIN
   socket.on('error', () => {});
 });
 

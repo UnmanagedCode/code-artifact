@@ -21,7 +21,7 @@ function watchErrors(page) {
   page.on('console', (m) => {
     if (m.type() === 'error' && !HOST_URLS.test(m.text()) && !/^Failed to load resource/.test(m.text())) failures.push(m.text());
   });
-  page.on('response', (r) => { if (r.status() >= 400 && !HOST_URLS.test(r.url())) failures.push(`${r.status()} ${r.url()}`); });
+  page.on('response', (r) => { if (r.status() >= 400 && !HOST_URLS.test(r.url()) && !(r.status() === 409 && /\/stop$/.test(r.url()))) failures.push(`${r.status()} ${r.url()}`); });
   page.on('pageerror', (e) => failures.push(`pageerror: ${e.message}`));
 }
 
@@ -140,6 +140,13 @@ try {
         assert.equal(await page.locator('.badge.status').textContent(), 'running');
         assert.ok(Math.abs((await page.locator('iframe.site').boundingBox()).height + (await page.locator('.bar').boundingBox()).height - viewport.height) < 2, 'the frame fills the viewport');
         await shot('page-app-running');
+        // A refused Stop while running shows in the bar and leaves the frame up.
+        await page.route('**/api/apps/*/stop', (route) => route.fulfill({ status: 409, contentType: 'application/json', body: '{"error":"stop refused: demo","code":"X"}' }));
+        await page.locator('[data-role="toggle"]').click();
+        await page.locator('[data-role="action-error"]', { hasText: 'stop refused: demo' }).waitFor();
+        assert.equal(await page.locator('iframe.site').count(), 1, 'the app is still framed');
+        await shot('page-app-action-error');
+        await page.unroute('**/api/apps/*/stop');
         await page.locator('[data-role="toggle"]').click();
         await page.locator('.app-panel').waitFor();
         await page.locator('.badge.status', { hasText: 'stopped' }).waitFor();

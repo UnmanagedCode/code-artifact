@@ -172,12 +172,13 @@ export function createOps({ store: storeOrGetter, cc, apps, limits = LIMITS }) {
         await apps.exclusive(id, () => store.deleteArtifact(id), { stopVersion: 'any' });
         return { deleted: 'artifact', id };
       }
-      // The app stops only when it runs the version going away; a refused delete must not stop it.
-      const current = await store.get(id);
-      const stoppable = current && current.versions.length > 1 && current.versions.some((v) => v.n === version);
-      const record = stoppable
-        ? await apps.exclusive(id, () => store.deleteVersion(id, version), { stopVersion: version })
-        : await store.deleteVersion(id, version);
+      // The app stops only when it runs the version going away and the delete will go ahead (a refused delete must not
+      // stop it); both are decided under the app's lock, so a concurrent update cannot slip between check and unlink.
+      const willDelete = async () => {
+        const current = await store.get(id);
+        return current !== null && current.versions.length > 1 && current.versions.some((v) => v.n === version);
+      };
+      const record = await apps.exclusive(id, () => store.deleteVersion(id, version), { stopVersion: version, precondition: willDelete });
       return { deleted: 'version', id, version, latest: record.versions[record.versions.length - 1].n };
     },
 

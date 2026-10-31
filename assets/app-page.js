@@ -8,7 +8,7 @@
   var toggle = body.querySelector('[data-role="toggle"]');
   var status = body.getAttribute('data-status');
   var timer = null;
-  var failure = null;
+  var actionError = body.querySelector('[data-role="action-error"]');
 
   var TEXT = {
     stopped: 'This app is stopped.',
@@ -16,6 +16,11 @@
     starting: 'Starting…',
     failed: 'The app failed.'
   };
+  // A refused Start/Stop shows in the bar, whatever the state: while running there is no panel to carry it.
+  function setFailure(message) {
+    actionError.textContent = message || '';
+    actionError.hidden = !message;
+  }
   var isActive = function (s) { return s === 'installing' || s === 'starting' || s === 'running'; };
 
   function el(tag, attrs, text) {
@@ -60,7 +65,7 @@
     if (frame) frame.remove();
     var p = panel();
     p.querySelector('[data-role="state-text"]').textContent = TEXT[status] || '';
-    var err = failure || st.error;
+    var err = st.error;
     var errEl = p.querySelector('[data-role="error"]');
     errEl.textContent = err || '';
     errEl.hidden = !err;
@@ -88,7 +93,7 @@
       .then(function (r) { return r.json(); })
       .then(function (st) {
         if (st && st.status) {
-          if (st.status !== status) failure = null;
+          if (st.status !== status) setFailure(null);
           render(st);
         }
         return refreshLog();
@@ -98,17 +103,17 @@
   }
 
   function act(what) {
-    failure = null;
+    setFailure(null);
     toggle.disabled = true;
     fetch(api + '/' + what, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
       .then(function (r) {
         return r.json().then(function (data) {
-          if (!r.ok) failure = data.error || 'HTTP ' + r.status;
+          if (!r.ok) setFailure(data.error || 'HTTP ' + r.status);
           return data;
         });
       })
       .then(function (st) { render(st && st.status ? st : { status: status }); return refreshLog(); })
-      .catch(function (e) { failure = String(e); render({ status: status }); })
+      .catch(function (e) { setFailure(String(e)); })
       .then(function () { toggle.disabled = false; schedule(); });
   }
 

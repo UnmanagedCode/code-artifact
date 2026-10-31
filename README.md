@@ -35,6 +35,8 @@ npm run typecheck
 - Markdown images and relative links are not bundled with the document.
 - An app runs unsandboxed with the plugin's environment, and sees every cookie of cc's origin.
 - An app's root-absolute URLs in its own HTML (`/x`) break under the proxy; use relative URLs or `$BASE_PATH` (or `prefix: "keep"` for frameworks with a base option).
+- The app sees `Host: 127.0.0.1:<port>` while `Origin` is cc's or the share's; frameworks with Origin/Host CSRF checks (Django, Rails) must trust `X-Forwarded-Host`, which carries the original host.
+- `BASE_PATH` is the app's URL path only when cc mounts the plugin; standalone, the proxy is at `/app/<id>/…`.
 - Only the latest version of an app runs; a pinned link to an older version shows a notice.
 - Apps stop on any plugin backend restart and are not restarted; orphan reaping after a crash needs Linux `/proc`.
 - An app that forbids framing (`X-Frame-Options: DENY`, `frame-ancestors 'none'`) cannot show in the wrapper.

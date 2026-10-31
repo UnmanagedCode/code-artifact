@@ -127,6 +127,7 @@ ${badge}
 <button type="button" class="btn" data-role="toggle">${active ? 'Stop' : 'Start'}</button>
 ${links}
 </header>
+<p class="bar-error" data-role="action-error" role="alert" hidden></p>
 <div class="stage" data-role="stage">
 ${stage}
 </div>
