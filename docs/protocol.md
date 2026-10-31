@@ -74,8 +74,8 @@ Every non-GET/HEAD/OPTIONS request needs `Content-Type: application/json` (else 
 | Route | Behaviour |
 |---|---|
 | `GET a/:id`, `GET a/:id/v/:n` | `301` to the relative `<id>/` and `<n>/` |
-| `GET a/:id/…` | The latest version; `Cache-Control: no-cache` |
-| `GET a/:id/v/:n/…` | A pinned version (`:n` is `[1-9][0-9]*`); `Cache-Control: private, max-age=31536000, immutable` |
+| `GET a/:id/…` | The latest version (a static artifact answers its wrapper page); `Cache-Control: no-cache` |
+| `GET a/:id/v/:n/…` | A pinned version (a static artifact answers its wrapper page; `:n` is `[1-9][0-9]*`); `Cache-Control: private, max-age=31536000, immutable` |
 | `GET raw/:id/:n/…` | A static site's files, byte for byte, always pinned to version `:n` (`:n` is `[1-9][0-9]*`); `Cache-Control: private, max-age=31536000, immutable`; no plugin CSP; `raw/:id/:n` redirects to `:n/` |
 | `GET dl/:id/:n` | `Content-Disposition: attachment`: the stored file, or a `<id>-v<n>.tar.gz` of a static site |
 | `GET _page/page.css`, `_page/fallback.css`, `_page/theme-init.js`, `_page/nav.js` | Assets of the server-rendered pages |

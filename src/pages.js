@@ -11,7 +11,7 @@ export function formatBytes(n) {
 
 // `prefix` is the relative path from the page back to the plugin root ("../../" under a/<id>/).
 const head = (prefix, title) => `<!doctype html>
-<html lang="en">
+<html lang="en" data-reload-on-search>
 <head>
 <meta charset="utf-8">
 <script src="/pluginBridge.js"></script>

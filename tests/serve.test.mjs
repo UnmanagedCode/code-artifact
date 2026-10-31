@@ -35,7 +35,10 @@ test('raw/<id>/<n> serves the version it names, immutable, whatever is latest; t
 test('raw: only static artifacts are served, and an unknown id is 404', async (t) => {
   const app = await startApp(t);
   const md = await publish(app, { path: await fixtureFile(t, 'a.md', '# x'), title: 'Doc' });
-  assert.equal((await app.get(`/raw/${md.id}/1/`)).status, 404);
+  const dl = await publish(app, { path: await fixtureFile(t, 'data.bin', 'DATA'), title: 'Bin' });
+  // The files exist in the store, so only the kind check can refuse them.
+  for (const url of [`/raw/${md.id}/1/a.md`, `/raw/${md.id}/1/`, `/raw/${dl.id}/1/data.bin`, `/raw/${dl.id}/1/`]) assert.equal((await app.get(url)).status, 404, url);
+  assert.equal((await app.get(`/dl/${dl.id}/1`)).text, 'DATA', 'the same file is served by dl/');
   assert.equal((await app.get('/raw/nope-abc123/1/')).status, 404);
   assert.equal((await app.get('/raw/NOPE/1/')).status, 404);
 });

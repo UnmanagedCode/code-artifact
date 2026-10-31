@@ -229,6 +229,8 @@ test('every malformed record shape is logged, left on disk, and excluded from ge
     'unknown kind': (rec) => { rec.kind = 'weird'; },
     'versions not ascending': (rec) => { rec.versions.push({ ...rec.versions[0], n: 1 }); },
     'nextVersion behind the versions': (rec) => { rec.nextVersion = 1; },
+    'non-string project': (rec) => { rec.project = 5; },
+    'non-string title': (rec) => { rec.title = null; },
     'not an object': () => 'null',
   };
   const good = await create(store, 'Good');
