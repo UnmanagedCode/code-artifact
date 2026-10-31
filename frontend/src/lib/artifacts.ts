@@ -42,12 +42,43 @@ export interface ArtifactRec {
   app?: AppStatus;
 }
 
-export type Route = { view: 'list' } | { view: 'detail'; id: string };
+/** `project` is the list filter, kept on the detail so its Back returns to the filtered list. */
+export type Route = { view: 'list'; project: string | null } | { view: 'detail'; id: string; project: string | null };
 
-/** The route held in the query string: `?artifact=<id>` is the detail view, anything else the list. */
+/** The route held in the query string: `?artifact=<id>` is the detail view, anything else the list; `?project=<name>` filters. */
 export function parseRoute(search: string): Route {
-  const id = new URLSearchParams(search).get('artifact');
-  return id ? { view: 'detail', id } : { view: 'list' };
+  const q = new URLSearchParams(search);
+  const project = q.get('project') || null;
+  const id = q.get('artifact');
+  return id ? { view: 'detail', id, project } : { view: 'list', project };
+}
+
+/** The query string for a route: the single writer of the UI's own params, encoded so a name cannot inject another. */
+export function routeSearch(route: Route): string {
+  const q = new URLSearchParams();
+  if (route.project) q.set('project', route.project);
+  if (route.view === 'detail') q.set('artifact', route.id);
+  return `?${q}`;
+}
+
+export const filterByProject = (artifacts: ArtifactRec[], project: string | null): ArtifactRec[] =>
+  project === null ? artifacts : artifacts.filter((a) => a.project === project);
+
+// cc's `menuItems` contract (cc docs/plugins.md) owns these names. The values are untrusted text, only ever rendered as text.
+const MENU_PARAMS = { project: 'ccProject', worktree: 'ccWorktree' };
+
+/**
+ * What a cc ⋮ "Show artifacts" click asks for, or null when the query carries no menu param. A named project
+ * shows its filtered list; a missing or empty name keeps `current` and reports a notice. The worktree is
+ * ignored: artifacts belong to a project. `search` is the query to put in place of the cc one.
+ */
+export function menuArrival(search: string, current: Route): { route: Route; search: string; notice: string | null } | null {
+  const q = new URLSearchParams(search);
+  if (!q.has(MENU_PARAMS.project) && !q.has(MENU_PARAMS.worktree)) return null;
+  const project = q.get(MENU_PARAMS.project) || null;
+  const route: Route = project === null ? current : { view: 'list', project };
+  const notice = project === null ? "Can't show artifacts: code-conductor named no project." : null;
+  return { route, search: routeSearch(route), notice };
 }
 
 export const latestOf = (a: ArtifactRec): VersionRec => a.versions[a.versions.length - 1];

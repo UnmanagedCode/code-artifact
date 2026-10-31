@@ -32,7 +32,7 @@ Node ESM backend (Express 4) plus a React/Vite/Tailwind v4 UI, one package. Cont
 | `src/http.js` | `wrap` (async handler errors), `refusalJson`, `plain` |
 | `assets/page.css` | Styles of the server-rendered pages (tokens only) |
 | `assets/app-page.js` | The app wrapper's behaviour: status polling, Start/Stop, log tail, iframe swap |
-| `frontend/` | The UI, per the plugin UI reference setup; `frontend/src/lib/artifacts.ts` holds the pure logic |
+| `frontend/` | The UI, per the plugin UI reference setup; `frontend/src/lib/artifacts.ts` holds the pure logic, including the route helpers `parseRoute`, `routeSearch` and `menuArrival` |
 
 ## Store on disk
 
@@ -75,6 +75,7 @@ Node ESM backend (Express 4) plus a React/Vite/Tailwind v4 UI, one package. Cont
 - Raw responses drop the CSP header (`res.removeHeader`); everything else keeps it.
 - The page assets under `_page/` are served from their one source file each, so the pages render while the UI is unbuilt.
 - cc steers a page it already shows with `navigate` (a `replaceState` plus a synthetic `popstate`, never a load). `frontend/public/nav.js`, loaded by the UI document and by every server-rendered page, reloads when the path changes under the document, and, on a server-rendered page (its `<html>` carries `data-reload-on-search`), when the query changes too; the UI's own query routing and hash-only changes never reload. Without it, opening an artifact from the UI, or a second artifact link while the plugin is docked, would leave stale content.
+- A cc ⋮ menu click (`?ccProject=…`) is query-only from the UI document, so `nav.js` leaves it to the UI's `popstate` handler, which retargets in place and re-fetches the list. From a server-rendered artifact page it is a path change, so `nav.js` reloads and the UI handles the arrival on load. Either way `menuArrival` replaces the cc query with the UI's own route via `history.replaceState`.
 - Markdown is rendered once at publish and read from `rendered.html`, so serving never parses.
 
 ## App processes
