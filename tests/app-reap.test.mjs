@@ -12,7 +12,7 @@ import { createCc } from '../src/cc.js';
 import { createOps } from '../src/ops.js';
 import { createAppHost } from '../src/appHost.js';
 import { tmp } from './_helpers.mjs';
-import { TIMINGS, appSource, markerPids, pidGone, publishApp, recordedPid, reapStore, runApp, startApps, waitFor } from './_apps.mjs';
+import { TIMINGS, appSource, markerPids, pidGone, publishApp, recordedPid, reapStore, runApp, startApps, waitFor, waitStatus } from './_apps.mjs';
 
 test('a boot on the same store reaps what a crashed backend left behind', async (t) => {
   const a = await startApps(t);
@@ -153,4 +153,33 @@ test('shutdown() leaves nothing marked even when an escaped descendant keeps spa
   await waitFor(async () => (await markerPids(a.storeDir)).length >= 5, { what: 'the spawner to have spawned several descendants' });
   await a.server.apps.shutdown();
   assert.deepEqual(await markerPids(a.storeDir), [], 'nothing marked is alive once shutdown() resolves');
+});
+
+test('shutdown() kills an escaped descendant that ignores SIGTERM', async (t) => {
+  let real;
+  t.after(() => real && reapStore(real)); // registered before the store's removal, so it runs first
+  const a = await startApps(t);
+  real = await fsp.realpath(a.storeDir);
+  const pub = await publishApp(t, a);
+  await runApp(a, pub.id);
+  await fetch(`${a.base}/app/${pub.id}/escape-ignore-term`);
+  const ignorer = await recordedPid(a.storeDir, pub.id, 'ignorer.pid');
+  assert.ok(await pidAlive(ignorer));
+  await a.server.apps.shutdown();
+  assert.equal(await pidAlive(ignorer), false, 'SIGTERM alone would not have stopped it');
+  assert.deepEqual(await markerPids(a.storeDir), []);
+});
+
+test('an app that fails after leaving an escaped descendant has that descendant killed', async (t) => {
+  let real;
+  t.after(() => real && reapStore(real)); // registered before the store's removal, so it runs first
+  const a = await startApps(t);
+  real = await fsp.realpath(a.storeDir);
+  const pub = await publishApp(t, a);
+  await runApp(a, pub.id);
+  await fetch(`${a.base}/app/${pub.id}/escape-then-exit`);
+  const escaped = await recordedPid(a.storeDir, pub.id, 'escaped.pid');
+  await waitStatus(a, pub.id, 'failed');
+  await pidGone(escaped); // only the marker sweep in the failure's cleanup can reach it: it is outside the dead app's group
+  assert.deepEqual(await markerPids(a.storeDir), []);
 });

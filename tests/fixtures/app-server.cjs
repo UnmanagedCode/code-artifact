@@ -90,6 +90,20 @@ const server = http.createServer((req, res) => {
     fs.writeFileSync(data('escaped.pid'), String(child.pid));
     return json({ pid: child.pid });
   }
+  if (p === '/escape-ignore-term') {
+    // An escaped descendant that ignores SIGTERM (an ignored signal survives the exec); it records its pid once the trap is set.
+    const child = cp.spawn('/bin/sh', ['-c', `trap '' TERM; echo $$ > "$DATA_DIR/ignorer.pid"; exec sleep 300`], { stdio: 'ignore', detached: true });
+    child.unref();
+    return json({ ok: true });
+  }
+  if (p === '/escape-then-exit') {
+    // Leaves an escaped descendant, then exits non-zero on its own once the response is out.
+    const child = cp.spawn('sleep', ['300'], { stdio: 'ignore', detached: true });
+    child.unref();
+    fs.writeFileSync(data('escaped.pid'), String(child.pid));
+    setTimeout(() => process.exit(1), 20);
+    return json({ pid: child.pid });
+  }
   if (p === '/escape-spawner') {
     // A descendant outside the process group that keeps spawning more escaped, marked descendants.
     const code = "const cp = require('node:child_process'); setInterval(() => cp.spawn('sleep', ['300'], { stdio: 'ignore', detached: true }).unref(), 5);";
