@@ -46,6 +46,10 @@ const backLink = (prefix, project) =>
   `<a class="btn ghost" href="${escapeHtml(`${prefix}?${new URLSearchParams({ project })}`)}"><span aria-hidden="true">←</span> Artifacts</a>`;
 const downloadLink = (prefix, id, n) => `${prefix}dl/${id}/${n}`;
 
+// By the stored file's extension: dl/ derives its Content-Type from the same name.
+const PREVIEW_IMAGE = /\.(png|jpe?g|gif|webp|svg)$/i;
+export const isPreviewImage = (name) => PREVIEW_IMAGE.test(name);
+
 /** The page for a markdown version: header plus the sanitized, pre-rendered body. */
 export function markdownPage({ prefix, id, project, version, latest, rendered }) {
   const header = `<p class="meta"><span class="badge">v${version.n} · ${latest ? 'latest' : 'pinned'}</span>
@@ -53,11 +57,17 @@ export function markdownPage({ prefix, id, project, version, latest, rendered })
   return shell({ prefix, project, title: version.title, header, body: `<article class="md">${rendered}</article>` });
 }
 
-/** The landing page for a download version; the attachment itself lives at dl/<id>/<n>. */
+/**
+ * The landing page for a download version; the attachment itself lives at dl/<id>/<n>.
+ * An image version also previews inline, as an <img> of that same URL, so an SVG never runs script.
+ */
 export function downloadPage({ prefix, id, project, version, latest }) {
   const header = `<p class="meta"><span class="badge">v${version.n} · ${latest ? 'latest' : 'pinned'}</span></p>`;
+  const preview = isPreviewImage(version.file)
+    ? `<p class="preview"><img src="${downloadLink(prefix, id, version.n)}" alt="${escapeHtml(version.title)}"></p>\n`
+    : '';
   const body = `<section class="landing">
-<p class="file">${escapeHtml(version.file)}</p>
+${preview}<p class="file">${escapeHtml(version.file)}</p>
 <p class="meta">${formatBytes(version.bytes)} · published ${stamp(version.publishedAt)}</p>
 <p><a class="btn primary" href="${downloadLink(prefix, id, version.n)}">Download</a></p>
 </section>`;

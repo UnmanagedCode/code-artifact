@@ -18,6 +18,8 @@ const PAGE_ASSETS = {
   'app-page.js': [path.join(ROOT, 'assets'), 'app-page.js'],
 };
 const PINNED_CACHE = 'private, max-age=31536000, immutable';
+// dl/ content is never a page: `sandbox` is the backstop if a browser renders an attachment (an SVG) top-level.
+const DL_CSP = "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:";
 
 /** Decoded path segments of a raw (percent-encoded) sub-path, or null when any is unsafe. `dir` marks a trailing slash. */
 function safeSegments(raw) {
@@ -157,6 +159,7 @@ export function contentRouter(getStore, apps) {
     const record = await store.get(id);
     const version = record?.versions.find((v) => v.n === Number(n));
     if (!version) return plain(res, 404, 'Not found');
+    res.set('Content-Security-Policy', DL_CSP);
     const content = path.join(store.versionDir(id, version.n), CONTENT);
     if (record.kind === 'static' || record.kind === 'app') {
       res.attachment(`${id}-v${version.n}.tar.gz`);

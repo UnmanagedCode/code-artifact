@@ -90,7 +90,7 @@ Deep links look like `http://cc.internal/#plugin/code-artifact/a/<id>/` (latest)
 |---|---|
 | `markdown` | A themed page with **← Artifacts**, the title, `v<n>` (latest or pinned), a Download link, and the rendered document |
 | `static` | A compact header bar (**← Artifacts**, title, `v<n>` latest or pinned, Download) over an iframe that fills the rest of the view and shows the site as authored, same-origin, with its own scripts and styles. A deeper deep link (`…/a/<id>/docs/page.html`) opens that page in the frame |
-| `download` | A landing page with **← Artifacts**, the file name, size, publish time and a Download button |
+| `download` | A landing page with **← Artifacts**, the file name, size, publish time and a Download button; an image (the extensions `PREVIEW_IMAGE` in `src/pages.js` matches on the stored file name) previews inline above the name, as an `<img>`, so an SVG's scripts never run |
 | `app` | A bar (**← Artifacts**, title, `v<n>` latest or pinned, live status, Start/Stop, Logs, Download) over an iframe with the running app. While the app is not running, a panel with a large **Start**, the error if any and a live log tail replaces the iframe. Navigation inside the frame is not mirrored to cc's URL |
 
 Every artifact view starts with **← Artifacts**: the overview list filtered to the artifact's project (`?project=<name>`); **Show all** drops the filter. It is a normal navigation, so browser Back returns to the artifact.
