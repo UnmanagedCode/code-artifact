@@ -48,9 +48,11 @@ function fakeWin() {
 function loadHelper({ top = false, window = {} } = {}) {
   const timers = fakeTimers();
   const listeners = [];
-  const parent = fakeWin();
   Object.assign(window, { addEventListener: (type, fn) => { if (type === 'message') listeners.push(fn); } });
-  window.parent = top ? window : parent;
+  // At top level the window is its own parent, and records what is posted to it like any other.
+  if (top) Object.assign(window, fakeWin());
+  const parent = top ? window : fakeWin();
+  window.parent = parent;
   vm.runInNewContext(helperSrc, { window, location: { origin: ORIGIN }, setTimeout: timers.setTimeout, clearTimeout: timers.clearTimeout });
   return { window, parent, timers, deliver: (ev) => listeners.forEach((fn) => fn(ev)) };
 }
@@ -109,8 +111,9 @@ const resultFor = (win, id) => results(win).find((r) => r.id === id);
 
 test('helper: a top-level page resolves NO_BRIDGE at once and posts nothing', async () => {
   const { window, parent, timers } = loadHelper({ top: true });
+  assert.equal(parent, window);
   assert.deepEqual(plain(await window.ccArtifact.report({ a: 1 })), { ok: false, code: 'NO_BRIDGE' });
-  assert.equal(parent.posted.length, 0);
+  assert.equal(window.posted.length, 0, 'nothing posted to itself, though it could be');
   assert.equal(timers.count, 0);
 });
 
@@ -249,6 +252,32 @@ test('relay: a malformed answer from cc or a throwing sendPrompt resolves HOST_E
     relay.send(report('r1', '{}'));
     await flush();
     assert.deepEqual(results(relay.frame), [{ ccArtifact: 1, type: 'result', id: 'r1', ok: false, code: 'HOST_ERROR' }]);
+  }
+});
+
+test('relay: with neither a bridge nor a publisher the answer is NO_BRIDGE', async () => {
+  const relay = loadRelay({ attrs: { ...ATTRS, 'data-publisher-session': '' } });
+  relay.send(report('r1', '{}'));
+  await flush();
+  assert.deepEqual(results(relay.frame), [{ ccArtifact: 1, type: 'result', id: 'r1', ok: false, code: 'NO_BRIDGE' }]);
+});
+
+test('relay: with no publisher every report is NO_PUBLISHER, past RATE_LIMIT too: refusals before the rate check take no slot', async () => {
+  const bridge = fakeBridge();
+  const relay = loadRelay({ bridge, attrs: { ...ATTRS, 'data-publisher-session': '' } });
+  for (let i = 0; i <= RATE_LIMIT; i++) relay.send(report(`r${i}`, '{}'));
+  await flush();
+  assert.equal(bridge.calls.length, 0);
+  assert.deepEqual([...new Set(results(relay.frame).map((r) => r.code))], ['NO_PUBLISHER']);
+  assert.equal(results(relay.frame).length, RATE_LIMIT + 1);
+});
+
+test('relay: cc\'s refusal with a non-string code reaches the page as HOST_ERROR', async () => {
+  for (const code of [7, null, undefined, { c: 'X' }]) {
+    const relay = loadRelay({ bridge: fakeBridge({ answer: { ok: false, code } }) });
+    relay.send(report('r1', '{}'));
+    await flush();
+    assert.deepEqual(results(relay.frame), [{ ccArtifact: 1, type: 'result', id: 'r1', ok: false, code: 'HOST_ERROR' }], String(code));
   }
 });
 
@@ -507,6 +536,19 @@ test('a client that disconnects right after its request line leaves no file hand
   })));
   // A complete request after the aborted ones: by the time it is answered, they have been handled too.
   assert.equal((await app.get(`/raw/${art.id}/1/`)).status, 200);
+  await waitFor(async () => (await fdsOn(stored)) === 0, { timeout: 2000, what: 'every handle on the served file to close' });
+});
+
+test('a 304 and a HEAD on raw HTML leave no file handle open', { skip: process.platform !== 'linux' && 'needs /proc' }, async (t) => {
+  const app = await startApp(t);
+  const art = await publish(app, { path: await fixtureDir(t, { 'index.html': '<!doctype html><p>v</p>' }), title: 'Site' });
+  const stored = await fsp.realpath(path.join(app.storeDir, 'artifacts', art.id, 'v', '1', 'content', 'index.html'));
+  const url = `${app.base}/raw/${art.id}/1/`;
+  const { etag } = (await request(url)).headers;
+  for (let i = 0; i < 20; i++) {
+    assert.equal((await request(url, { headers: { 'if-none-match': etag } })).status, 304);
+    assert.equal((await request(url, { method: 'HEAD' })).status, 200);
+  }
   await waitFor(async () => (await fdsOn(stored)) === 0, { timeout: 2000, what: 'every handle on the served file to close' });
 });
 
