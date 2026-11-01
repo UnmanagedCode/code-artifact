@@ -16,6 +16,8 @@ const PAGE_ASSETS = {
   'theme-init.js': [path.join(ROOT, 'frontend', 'public'), 'theme-init.js'],
   'nav.js': [path.join(ROOT, 'frontend', 'public'), 'nav.js'],
   'app-page.js': [path.join(ROOT, 'assets'), 'app-page.js'],
+  'report.js': [path.join(ROOT, 'assets'), 'report.js'],
+  'relay.js': [path.join(ROOT, 'assets'), 'relay.js'],
 };
 const PINNED_CACHE = 'private, max-age=31536000, immutable';
 // dl/ content is never a page: `sandbox` is the backstop if a browser renders an attachment (an SVG) top-level.
@@ -36,6 +38,25 @@ function safeSegments(raw) {
   return { segs, dir };
 }
 
+/** Relative path from a page at `reqPath` back to the plugin root: one `../` per directory level of the URL. */
+const rootPrefix = (reqPath) => '../'.repeat(reqPath.split('/').length - 2);
+
+// Leading UTF-8 BOM, whitespace and comments, then the doctype. A comment body cannot span `-->`, so a failed match stays linear.
+const DOCTYPE_RE = /^(?:\xEF\xBB\xBF)?(?:\s|<!--(?:(?!-->)[\s\S])*-->)*<!doctype[^>]*>/i;
+
+/**
+ * `buf` with `<script src="${src}">` spliced in after the doctype (before it would switch the page to quirks mode), else after a
+ * UTF-8 BOM, else first. The offset is found on the latin1 view (one char per byte), so the bytes around it are untouched.
+ * A UTF-16 document is returned as is.
+ */
+function withReportScript(buf, src) {
+  if (buf.length >= 2 && ((buf[0] === 0xff && buf[1] === 0xfe) || (buf[0] === 0xfe && buf[1] === 0xff))) return buf;
+  const m = DOCTYPE_RE.exec(buf.toString('latin1'));
+  const bom = buf.length >= 3 && buf[0] === 0xef && buf[1] === 0xbb && buf[2] === 0xbf;
+  const at = m ? m[0].length : bom ? 3 : 0;
+  return Buffer.concat([buf.subarray(0, at), Buffer.from(`<script src="${src}"></script>`), buf.subarray(at)]);
+}
+
 const insideRoot = (root, p) => p === root || p.startsWith(root + path.sep);
 
 /** A regular, non-symlink file at `rel` under `content` whose real path stays inside it; else null. */
@@ -50,7 +71,8 @@ async function regularFile(contentReal, content, rel) {
   }
 }
 
-async function serveStatic(res, next, content, sub) {
+/** Serves a static site's file at `sub`; an HTML file gets the report helper `reportSrc` injected. */
+async function serveStatic(res, next, content, sub, reportSrc) {
   const parsed = safeSegments(sub);
   if (!parsed) return plain(res, 404, 'Not found');
   let contentReal;
@@ -69,6 +91,10 @@ async function serveStatic(res, next, content, sub) {
   if (kind !== 'file') return plain(res, 404, 'Not found');
   // The trusted stance: a static site runs as authored, so the plugin's own CSP is not applied to it.
   res.removeHeader('Content-Security-Policy');
+  if (/\.html?$/i.test(rel)) {
+    const buf = await fsp.readFile(path.join(content, rel));
+    return res.type(path.extname(rel)).send(withReportScript(buf, reportSrc));
+  }
   // A relative path with `root`: an absolute one makes dotfiles:'deny' refuse a store under a dot-directory.
   return res.sendFile(rel, { root: content, dotfiles: 'deny', cacheControl: false }, (err) => {
     if (err) next(err.status === 404 ? undefined : err);
@@ -112,8 +138,7 @@ export function contentRouter(getStore, apps) {
     const dir = store.versionDir(id, version.n);
     res.set('Cache-Control', pinned ? PINNED_CACHE : 'no-cache');
 
-    // Relative path from this page back to the plugin root: one `../` per directory level of the URL.
-    const prefix = '../'.repeat(req.path.split('/').length - 2);
+    const prefix = rootPrefix(req.path);
     const ctx = { prefix, id, project: record.project, version, latest: !pinned };
     if (record.kind === 'static') {
       // The site itself is served raw and pinned; this page is the plugin-rendered wrapper around it.
@@ -139,7 +164,7 @@ export function contentRouter(getStore, apps) {
     return res.type('html').send(downloadPage(ctx));
   }));
 
-  // The static site's files, byte for byte, always pinned to a concrete version.
+  // The static site's files, always pinned to a concrete version: byte for byte, except the report helper's tag in HTML.
   r.get('/raw/*', wrap(async (req, res, next) => {
     const m = /^\/raw\/([^/]+)\/([1-9][0-9]*)(\/.*)?$/.exec(req.path);
     if (!m || !ID_RE.test(m[1])) return plain(res, 404, 'Not found');
@@ -149,7 +174,7 @@ export function contentRouter(getStore, apps) {
     const record = await store.get(id);
     if (record?.kind !== 'static' || !record.versions.some((v) => v.n === Number(n))) return plain(res, 404, 'Not found');
     res.set('Cache-Control', PINNED_CACHE);
-    return serveStatic(res, next, path.join(store.versionDir(id, Number(n)), CONTENT), rest);
+    return serveStatic(res, next, path.join(store.versionDir(id, Number(n)), CONTENT), rest, `${rootPrefix(req.path)}_page/report.js`);
   }));
 
   r.get('/dl/:id/:n', wrap(async (req, res, next) => {

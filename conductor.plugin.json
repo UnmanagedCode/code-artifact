@@ -12,7 +12,7 @@
     "tools": [
       {
         "name": "publish_artifact",
-        "description": "Publish a file or directory as a new immutable, versioned artifact and get a link the user can open in cc. The kind is inferred from the source: a .md file is markdown; a .html file, or a directory/.tar.gz with a root index.html, is a static site; a directory/.tar.gz with a root artifact.json ({start, install?, prefix?}) is an app that code-artifact runs for the user: it is published stopped and the user starts it from the link, so publish the source without node_modules; anything else is a downloadable file. Pass project when called from the conductor (its own project is not a user project).",
+        "description": "Publish a file or directory as a new immutable, versioned artifact and get a link the user can open in cc. The kind is inferred from the source: a .md file is markdown; a .html file, or a directory/.tar.gz with a root index.html, is a static site; a directory/.tar.gz with a root artifact.json ({start, install?, prefix?}) is an app that code-artifact runs for the user: it is published stopped and the user starts it from the link, so publish the source without node_modules; anything else is a downloadable file. Pass project when called from the conductor (its own project is not a user project). A static or app page can send JSON back to the publishing session with `ccArtifact.report(data)` (injected into static HTML; an app loads `/plugins/code-artifact/_page/report.js`), which resolves `{ok, code}`.",
         "inputSchema": {
           "type": "object",
           "properties": {

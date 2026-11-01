@@ -74,9 +74,17 @@ ${preview}<p class="file">${escapeHtml(version.file)}</p>
   return shell({ prefix, project, title: version.title, header, body });
 }
 
+/** What `_page/relay.js` reads: the viewed version and the session that published it (empty when none was recorded). */
+const reportAttrs = (version, id) => ` data-artifact-id="${escapeHtml(id)}" data-artifact-version="${escapeHtml(version.n)}"`
+  + ` data-artifact-title="${escapeHtml(version.title)}" data-publisher-session="${escapeHtml(version.sessionId ?? '')}"`;
+
+// Blocking and first in <body>: its listener must exist before the iframe's page can post a report.
+const relayScript = (prefix) => `<script src="${prefix}_page/relay.js"></script>`;
+
 /** The wrapper for a static version: a compact header bar over an iframe (`frameSrc`, a relative raw URL) that shows the site. */
 export function staticPage({ prefix, id, project, version, latest, frameSrc }) {
-  return `${head(prefix, version.title)}<body class="wrap">
+  return `${head(prefix, version.title)}<body class="wrap"${reportAttrs(version, id)}>
+${relayScript(prefix)}
 <header class="bar">
 ${backLink(prefix, project)}
 <h1>${escapeHtml(version.title)}</h1>
@@ -136,7 +144,8 @@ ${links}
 <p><button type="button" class="btn primary" data-role="start"${active ? ' hidden' : ''}>Start</button></p>
 <pre class="log" data-role="log" aria-label="App log"></pre>
 </section>`;
-  return `${head(prefix, version.title)}<body class="wrap app" data-api="${prefix}api/apps/${id}" data-frame-src="${escapeHtml(frameSrc)}" data-title="${title}" data-status="${state.status}">
+  return `${head(prefix, version.title)}<body class="wrap app" data-api="${prefix}api/apps/${id}" data-frame-src="${escapeHtml(frameSrc)}" data-title="${title}" data-status="${state.status}"${reportAttrs(version, id)}>
+${relayScript(prefix)}
 <header class="bar">
 ${backLink(prefix, project)}
 <h1>${title}</h1>
