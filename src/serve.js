@@ -1,6 +1,7 @@
 import express from 'express';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
+import { pipeline } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 import * as tar from 'tar';
 import { ID_RE } from './links.js';
@@ -61,9 +62,16 @@ function reportOffset(head) {
 /**
  * Sends the HTML file `abs` with `<script src="${src}">` spliced in at `reportOffset`, streaming everything past the scanned head.
  * Validators come from the file's stat and the served length; a matching conditional request gets a 304, a HEAD the headers only.
+ * No Range support: offsets in the served body are not offsets in the file.
  */
 async function sendHtml(req, res, abs, src) {
-  const fh = await fsp.open(abs, 'r');
+  let fh;
+  try {
+    fh = await fsp.open(abs, 'r');
+  } catch (e) {
+    if (e.code === 'ENOENT') return plain(res, 404, 'Not found'); // the version was deleted since the file was resolved
+    throw e;
+  }
   let streaming = false;
   try {
     const st = await fh.stat();
@@ -71,9 +79,12 @@ async function sendHtml(req, res, abs, src) {
     const { bytesRead } = await fh.read(scan, 0, scan.length, 0);
     const at = reportOffset(scan.subarray(0, bytesRead));
     const tag = at === null ? Buffer.alloc(0) : Buffer.from(`<script src="${src}"></script>`);
+    // The client may have left during the reads above, and its `close` has then already fired.
+    if (res.destroyed) return;
     const length = st.size + tag.length;
     res.type(path.extname(abs));
     res.set({
+      'Accept-Ranges': 'none',
       'Content-Length': String(length),
       ETag: `W/"${length.toString(16)}-${st.mtime.getTime().toString(16)}"`,
       'Last-Modified': st.mtime.toUTCString(),
@@ -86,11 +97,11 @@ async function sendHtml(req, res, abs, src) {
     if (req.method === 'HEAD') return res.end();
     const head = scan.subarray(0, at ?? 0);
     res.write(Buffer.concat([head, tag]));
-    const rest = fh.createReadStream({ start: head.length });
+    const rest = fh.createReadStream({ start: head.length }); // closes `fh` when it ends or is destroyed
     streaming = true;
-    rest.on('error', (e) => { console.error('code-artifact: raw read failed:', e); res.destroy(e); });
-    res.on('close', () => rest.destroy());
-    return rest.pipe(res);
+    return pipeline(rest, res, (err) => {
+      if (err && err.code !== 'ERR_STREAM_PREMATURE_CLOSE') console.error('code-artifact: raw read failed:', err);
+    });
   } finally {
     if (!streaming) await fh.close();
   }

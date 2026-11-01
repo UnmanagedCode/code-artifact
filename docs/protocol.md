@@ -101,7 +101,7 @@ Every non-GET/HEAD/OPTIONS request needs `Content-Type: application/json` (else 
 | `GET a/:id`, `GET a/:id/v/:n` | `301` to the relative `<id>/` and `<n>/` |
 | `GET a/:id/…` | The latest version (a static artifact answers its wrapper page); `Cache-Control: no-cache` |
 | `GET a/:id/v/:n/…` | A pinned version (a static artifact answers its wrapper page; `:n` is `[1-9][0-9]*`); `Cache-Control: private, max-age=31536000, immutable` |
-| `GET raw/:id/:n/…` | A static site's files, byte for byte except the report helper's tag in HTML (see **Artifact reports**), always pinned to version `:n` (`:n` is `[1-9][0-9]*`); `Cache-Control: private, max-age=31536000, immutable`; no plugin CSP; `raw/:id/:n` redirects to `:n/` |
+| `GET raw/:id/:n/…` | A static site's files, byte for byte except the report helper's tag in HTML (see **Artifact reports**; injected HTML answers `Accept-Ranges: none` and ignores `Range`), always pinned to version `:n` (`:n` is `[1-9][0-9]*`); `Cache-Control: private, max-age=31536000, immutable`; no plugin CSP; `raw/:id/:n` redirects to `:n/` |
 | `GET a/:id/…`, `a/:id/v/:n/…` (app) | The app wrapper page; `Cache-Control: no-cache` for pinned URLs too (it shows live status). A sub-path with a `..` segment (also percent-encoded) or a backslash is 404; other sub-paths, dot-led included, are forwarded |
 | `* app/:id` | `301` to the relative `<id>/`, query kept |
 | `* app/:id/…` | Reverse-proxied to the running app (below); an app that is not running is `503`, an id that is unknown or not an app is `404`, both plain text with the plugin CSP |
@@ -135,7 +135,7 @@ A static or app page calls `ccArtifact.report(data)` to send JSON to the session
 - The target session, title, id and version come from the wrapper's `<body>` attributes (`data-publisher-session`, `data-artifact-title`, `data-artifact-id`, `data-artifact-version`), never from the message; a `sessionId` in it is ignored.
 - Only the static wrapper and the app wrapper of the running (latest) version carry these attributes and load `_page/relay.js`.
 
-**Relay checks, in order:** `json` not a string → `INVALID_DATA`; more UTF-16 code units than `MAX_REPORT_BYTES` → `TOO_LARGE` (before any parse, so JSON that is both invalid and oversized is `TOO_LARGE`); not parseable → `INVALID_DATA`; more UTF-8 bytes than `MAX_REPORT_BYTES` → `TOO_LARGE`; then `NO_BRIDGE` → → `NO_PUBLISHER` → `RATE_LIMITED` → one `sendPrompt`, raced against a deadline. Limits are the constants in `assets/relay.js`: `MAX_REPORT_BYTES` (UTF-8 bytes of `json`), `RATE_LIMIT` sends per `RATE_WINDOW_MS` per wrapper page load (every attempt that reaches the rate check takes a slot, even if cc refuses it), `DEADLINE_MS`. The helper has its own longer `DEADLINE_MS` in `assets/report.js`.
+**Relay checks, in order:** `json` not a string → `INVALID_DATA`; more UTF-16 code units than `MAX_REPORT_BYTES` → `TOO_LARGE` (before any parse, so JSON that is both invalid and oversized is `TOO_LARGE`); not parseable → `INVALID_DATA`; more UTF-8 bytes than `MAX_REPORT_BYTES` → `TOO_LARGE`; then `NO_BRIDGE` → `NO_PUBLISHER` → `RATE_LIMITED` → one `sendPrompt`, raced against a deadline. Limits are the constants in `assets/relay.js`: `MAX_REPORT_BYTES` (UTF-8 bytes of `json`), `RATE_LIMIT` sends per `RATE_WINDOW_MS` per wrapper page load (every attempt that reaches the rate check takes a slot, even if cc refuses it), `DEADLINE_MS`. The helper has its own longer `DEADLINE_MS` in `assets/report.js`.
 
 | Code | From | When |
 |---|---|---|

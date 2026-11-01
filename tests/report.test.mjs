@@ -7,10 +7,11 @@ import fsp from 'node:fs/promises';
 import vm from 'node:vm';
 import * as tar from 'tar';
 import http from 'node:http';
+import net from 'node:net';
 import path from 'node:path';
 import { DOCTYPE_SCAN_BYTES } from '../src/serve.js';
 import { fixtureDir, publish, startApp, tmp } from './_helpers.mjs';
-import { appSource, publishApp, runApp, startApps } from './_apps.mjs';
+import { appSource, publishApp, runApp, startApps, waitFor } from './_apps.mjs';
 
 const helperSrc = await fsp.readFile(new URL('../assets/report.js', import.meta.url), 'utf8');
 const relaySrc = await fsp.readFile(new URL('../assets/relay.js', import.meta.url), 'utf8');
@@ -482,6 +483,41 @@ test('raw HTML keeps its validators: an ETag and Last-Modified, a 304 for a matc
   assert.match(head.headers['content-type'], /^text\/html/);
   assert.equal(head.headers.etag, etag);
   assert.equal(head.body, '');
+});
+
+/** How many of this process's fds are open on `file` (the backend runs in-process). */
+async function fdsOn(file) {
+  let n = 0;
+  for (const fd of await fsp.readdir('/proc/self/fd')) {
+    try { if (await fsp.readlink(`/proc/self/fd/${fd}`) === file) n++; } catch { /* closed while listing */ }
+  }
+  return n;
+}
+
+test('a client that disconnects right after its request line leaves no file handle open', { skip: process.platform !== 'linux' && 'needs /proc' }, async (t) => {
+  const app = await startApp(t);
+  const art = await publish(app, { path: await fixtureDir(t, { 'index.html': `<!doctype html>${'x'.repeat(1024 * 1024)}` }), title: 'Site' });
+  const stored = await fsp.realpath(path.join(app.storeDir, 'artifacts', art.id, 'v', '1', 'content', 'index.html'));
+  const { port } = new URL(app.base);
+  await Promise.all(Array.from({ length: 50 }, () => new Promise((resolve) => {
+    const sock = net.connect(Number(port), '127.0.0.1', () => {
+      sock.write(`GET /raw/${art.id}/1/ HTTP/1.1\r\nHost: x\r\n\r\n`, () => { sock.destroy(); resolve(); });
+    });
+    sock.on('error', resolve);
+  })));
+  // A complete request after the aborted ones: by the time it is answered, they have been handled too.
+  assert.equal((await app.get(`/raw/${art.id}/1/`)).status, 200);
+  await waitFor(async () => (await fdsOn(stored)) === 0, { timeout: 2000, what: 'every handle on the served file to close' });
+});
+
+test('injected HTML answers Accept-Ranges: none and a Range request with the whole document', async (t) => {
+  const app = await startApp(t);
+  const html = '<!doctype html><p>ranged</p>';
+  const art = await publish(app, { path: await fixtureDir(t, { 'index.html': html }), title: 'Site' });
+  const res = await request(`${app.base}/raw/${art.id}/1/`, { headers: { range: 'bytes=0-4' } });
+  assert.equal(res.status, 200);
+  assert.equal(res.headers['accept-ranges'], 'none');
+  assert.equal(res.body, `<!doctype html>${TAG('../../../')}<p>ranged</p>`);
 });
 
 test('non-HTML files are byte for byte, and dl/ packs the original, uninjected tree', async (t) => {
