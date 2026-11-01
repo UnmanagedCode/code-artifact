@@ -514,42 +514,65 @@ test('raw HTML keeps its validators: an ETag and Last-Modified, a 304 for a matc
   assert.equal(head.body, '');
 });
 
-/** How many of this process's fds are open on `file` (the backend runs in-process). */
-async function fdsOn(file) {
-  let n = 0;
-  for (const fd of await fsp.readdir('/proc/self/fd')) {
-    try { if (await fsp.readlink(`/proc/self/fd/${fd}`) === file) n++; } catch { /* closed while listing */ }
-  }
-  return n;
+/**
+ * Spies, in this process (the backend runs in-process), on the FileHandles `fsp.open` returns for paths ending in `suffix`:
+ * `opened` in order, `closed` (an explicit `close()` call; the GC finalizer closes natively and is never recorded) and
+ * `streamed` (a read stream was made from it). `close` is an own field of each handle, so each handle is wrapped as it opens.
+ * Restored when the test ends.
+ */
+function spyHandles(t, suffix) {
+  const spy = { opened: [], closed: new Set(), streamed: new Set() };
+  const { open } = fsp;
+  fsp.open = async function (p, ...rest) {
+    const fh = await open.call(this, p, ...rest);
+    if (!String(p).endsWith(suffix)) return fh;
+    spy.opened.push(fh);
+    const { close, createReadStream } = fh;
+    fh.close = (...args) => { spy.closed.add(fh); return close.apply(fh, args); };
+    fh.createReadStream = (...args) => { spy.streamed.add(fh); return createReadStream.apply(fh, args); };
+    return fh;
+  };
+  t.after(() => { fsp.open = open; });
+  spy.unclosed = () => spy.opened.filter((fh) => !spy.closed.has(fh));
+  return spy;
 }
 
-test('a client that disconnects right after its request line leaves no file handle open', { skip: process.platform !== 'linux' && 'needs /proc' }, async (t) => {
+test('a client that disconnects right after its request line: every handle opened on the file is closed explicitly', async (t) => {
   const app = await startApp(t);
   const art = await publish(app, { path: await fixtureDir(t, { 'index.html': `<!doctype html>${'x'.repeat(1024 * 1024)}` }), title: 'Site' });
-  const stored = await fsp.realpath(path.join(app.storeDir, 'artifacts', art.id, 'v', '1', 'content', 'index.html'));
+  const spy = spyHandles(t, path.join(art.id, 'v', '1', 'content', 'index.html'));
   const { port } = new URL(app.base);
-  await Promise.all(Array.from({ length: 50 }, () => new Promise((resolve) => {
+  const ABORTS = 50;
+  await Promise.all(Array.from({ length: ABORTS }, () => new Promise((resolve) => {
     const sock = net.connect(Number(port), '127.0.0.1', () => {
       sock.write(`GET /raw/${art.id}/1/ HTTP/1.1\r\nHost: x\r\n\r\n`, () => { sock.destroy(); resolve(); });
     });
     sock.on('error', resolve);
   })));
-  // A complete request after the aborted ones: by the time it is answered, they have been handled too.
+  // Every aborted request still reaches sendHtml (the request line was complete), plus the one complete request below.
   assert.equal((await app.get(`/raw/${art.id}/1/`)).status, 200);
-  await waitFor(async () => (await fdsOn(stored)) === 0, { timeout: 2000, what: 'every handle on the served file to close' });
+  await waitFor(() => spy.opened.length === ABORTS + 1, { timeout: 5000, what: 'every request to open the file' });
+  // A handle the code forgot is closed only by GC, which the spy never sees, so this wait fails rather than races.
+  await waitFor(() => spy.unclosed().length === 0, { timeout: 5000, what: 'an explicit close of every handle' });
+  assert.ok(spy.opened.some((fh) => !spy.streamed.has(fh)), 'some abort was seen before streaming began');
 });
 
-test('a 304 and a HEAD on raw HTML leave no file handle open', { skip: process.platform !== 'linux' && 'needs /proc' }, async (t) => {
+test('a 304 and a HEAD on raw HTML close their file handle explicitly, without streaming', async (t) => {
   const app = await startApp(t);
   const art = await publish(app, { path: await fixtureDir(t, { 'index.html': '<!doctype html><p>v</p>' }), title: 'Site' });
-  const stored = await fsp.realpath(path.join(app.storeDir, 'artifacts', art.id, 'v', '1', 'content', 'index.html'));
   const url = `${app.base}/raw/${art.id}/1/`;
   const { etag } = (await request(url)).headers;
-  for (let i = 0; i < 20; i++) {
-    assert.equal((await request(url, { headers: { 'if-none-match': etag } })).status, 304);
-    assert.equal((await request(url, { method: 'HEAD' })).status, 200);
+  const spy = spyHandles(t, path.join(art.id, 'v', '1', 'content', 'index.html'));
+  for (const opts of [{ headers: { 'if-none-match': etag } }, { method: 'HEAD' }]) {
+    const before = spy.opened.length;
+    const res = await request(url, opts);
+    assert.equal(res.status, opts.method === 'HEAD' ? 200 : 304);
+    await flush();
+    const mine = spy.opened.slice(before);
+    assert.equal(mine.length, 1, JSON.stringify(opts));
+    assert.ok(spy.closed.has(mine[0]), `closed explicitly: ${JSON.stringify(opts)}`);
+    assert.ok(!spy.streamed.has(mine[0]), `never streamed: ${JSON.stringify(opts)}`);
   }
-  await waitFor(async () => (await fdsOn(stored)) === 0, { timeout: 2000, what: 'every handle on the served file to close' });
 });
 
 test('injected HTML answers Accept-Ranges: none and a Range request with the whole document', async (t) => {
