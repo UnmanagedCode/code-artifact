@@ -95,6 +95,14 @@ Deep links look like `http://cc.internal/#plugin/code-artifact/a/<id>/` (latest)
 
 Every artifact view starts with **← Artifacts**: the overview list filtered to the artifact's project (`?project=<name>`); **Show all** drops the filter. It is a normal navigation, so browser Back returns to the artifact.
 
+### Reporting back to the publishing session
+
+A static site or app page can send data back to the session that published the version you are viewing, with `ccArtifact.report(data)` (a static site has it automatically; an app loads `/plugins/code-artifact/_page/report.js`). The session receives the JSON in a prompt that labels it untrusted artifact data. The call resolves `{ok: true}` or `{ok: false, code}`.
+
+- It works only while the artifact is open in cc's UI (a deep link, the dock, or **Open** in the list). Viewed outside cc it answers `NO_BRIDGE`.
+- One attempt: nothing is stored or retried. A session that has ended, is unknown or is busy answers with cc's code.
+- Each report is capped in size and rate per page load; codes and limits in [protocol.md](protocol.md#artifact-reports).
+
 Every version can be downloaded from `dl/<id>/<n>`; a static or app version downloads as `<id>-v<n>.tar.gz` (an app's published tree).
 
 ## UI

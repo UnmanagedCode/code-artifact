@@ -16,15 +16,17 @@ async function staticApp(t, files = SITE) {
 }
 
 const CSP_RE = /default-src 'none'/;
+// Raw HTML is served with the report helper's tag spliced in (no doctype here, so first); `depth` is the page's directory depth below raw/.
+const injected = (html, depth = 3) => `<script src="${'../'.repeat(depth)}_page/report.js"></script>${html}`;
 
 test('raw/<id>/<n> serves the version it names, immutable, whatever is latest; the latest route is a no-cache wrapper', async (t) => {
   const app = await startApp(t);
   const art = await publish(app, { path: await fixtureDir(t, { 'index.html': 'ONE' }), title: 'Site' });
   await app.mcp('update_artifact', { artifact: art.id, path: await fixtureDir(t, { 'index.html': 'TWO' }) });
   const one = await app.get(`/raw/${art.id}/1/`);
-  assert.equal(one.text, 'ONE');
+  assert.equal(one.text, injected('ONE'));
   assert.equal(one.headers.get('cache-control'), 'private, max-age=31536000, immutable');
-  assert.equal((await app.get(`/raw/${art.id}/2/`)).text, 'TWO');
+  assert.equal((await app.get(`/raw/${art.id}/2/`)).text, injected('TWO'));
   assert.equal((await app.get(`/raw/${art.id}/3/`)).status, 404);
   assert.equal((await app.get(`/raw/${art.id}/0/`)).status, 404);
   assert.equal((await app.get(`/a/${art.id}/`)).headers.get('cache-control'), 'no-cache');
@@ -45,11 +47,11 @@ test('raw: only static artifacts are served, and an unknown id is 404', async (t
 
 test('raw: index.html is the default, files and nested index.html serve, with their content types', async (t) => {
   const { app, art } = await staticApp(t);
-  assert.equal((await app.get(`/raw/${art.id}/1/`)).text, '<h1>home</h1>');
+  assert.equal((await app.get(`/raw/${art.id}/1/`)).text, injected('<h1>home</h1>'));
   const js = await app.get(`/raw/${art.id}/1/app.js`);
   assert.equal(js.text, 'console.log(1)');
   assert.match(js.headers.get('content-type'), /javascript/);
-  assert.equal((await app.get(`/raw/${art.id}/1/docs/`)).text, 'docs');
+  assert.equal((await app.get(`/raw/${art.id}/1/docs/`)).text, injected('docs', 4));
   assert.equal((await app.get(`/raw/${art.id}/1/docs/guide.txt`)).text, 'guide');
 });
 
@@ -167,7 +169,7 @@ test('a lone html file is the site root of its raw version', async (t) => {
   const app = await startApp(t);
   const art = await publish(app, { path: await fixtureFile(t, 'page.html', '<p>lone</p>'), title: 'Lone' });
   assert.equal(art.kind, 'static');
-  assert.equal((await app.get(`/raw/${art.id}/1/`)).text, '<p>lone</p>');
+  assert.equal((await app.get(`/raw/${art.id}/1/`)).text, injected('<p>lone</p>'));
 });
 
 test('markdown: the page has the bridge first, the theme, relative assets, sanitized content and the CSP', async (t) => {

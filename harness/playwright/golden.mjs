@@ -245,6 +245,24 @@ try {
         await artifactsLink.waitFor();
         await shot('page-static');
         assert.ok(await fits(), `static page overflows at ${vname} width`);
+        // ccArtifact.report(): standalone the wrapper has no ccBridge, so the page hears NO_BRIDGE.
+        const frameAt = (re) => page.frames().find((f) => re.test(new URL(f.url()).pathname));
+        const reportFrom = (frame, data) => frame.evaluate((d) => window.ccArtifact.report(d), data);
+        assert.deepEqual(await reportFrom(frameAt(/^\/raw\//), { rating: 5 }), { ok: false, code: 'NO_BRIDGE' });
+        // A fake ccBridge in the wrappers only (where cc's bridge defines it): the report reaches the publishing session, framed.
+        await page.addInitScript(() => {
+          if (!location.pathname.startsWith('/a/')) return;
+          window.__reports = [];
+          window.ccBridge = { sendPrompt: (sessionId, text) => { window.__reports.push({ sessionId, text }); return Promise.resolve({ ok: true }); } };
+        });
+        await page.reload();
+        await page.frameLocator('iframe.site').getByRole('heading', { name: 'Demo site' }).waitFor();
+        assert.deepEqual(await reportFrom(frameAt(/^\/raw\//), { rating: 5 }), { ok: true });
+        const [sent] = await page.evaluate(() => window.__reports);
+        assert.equal(sent.sessionId, 'a1b2c3d4-0000');
+        assert.match(sent.text, /^\[Artifact report\] Your artifact "Demo site"/);
+        assert.match(sent.text, /```json\n\{"rating":5\}\n```$/);
+        await shot('page-static-reported');
         // App wrapper: stopped panel, Start, the running frame, then a failed app with its log tail.
         await stopApps();
         await page.goto(`${world.url}/a/${world.ids.app}/`);
@@ -259,6 +277,19 @@ try {
         assert.ok(Math.abs((await page.locator('iframe.site').boundingBox()).height + (await page.locator('.bar').boundingBox()).height - viewport.height) < 2, 'the frame fills the viewport');
         await shot('page-app-running');
         assert.ok(await fits(), `running app page overflows at ${vname} width`);
+        // An app reports with the raw protocol, or by loading the helper from its stable URL.
+        const appFrame = frameAt(/^\/app\//);
+        const raw = await appFrame.evaluate(() => new Promise((resolve) => {
+          addEventListener('message', (ev) => { if (ev.data && ev.data.ccArtifact === 1 && ev.data.id === 'g1') resolve(ev.data); });
+          parent.postMessage({ ccArtifact: 1, type: 'report', id: 'g1', json: '{"app":true}' }, location.origin);
+        }));
+        assert.deepEqual(raw, { ccArtifact: 1, type: 'result', id: 'g1', ok: true });
+        await appFrame.evaluate(() => new Promise((resolve, reject) => {
+          const s = Object.assign(document.createElement('script'), { src: '/_page/report.js', onload: resolve, onerror: reject });
+          document.head.appendChild(s);
+        }));
+        assert.deepEqual(await reportFrom(appFrame, { via: 'helper' }), { ok: true });
+        assert.deepEqual((await page.evaluate(() => window.__reports)).map((r) => r.sessionId), ['a1b2c3d4-0000', 'a1b2c3d4-0000']);
         // A refused Stop while running shows in the bar and leaves the frame up.
         await page.route('**/api/apps/*/stop', (route) => route.fulfill({ status: 409, contentType: 'application/json', body: '{"error":"stop refused: demo","code":"X"}' }));
         await page.locator('[data-role="toggle"]').click();
