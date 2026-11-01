@@ -281,6 +281,18 @@ test('download: an image\'s landing page previews it from dl/ and keeps Download
   assert.deepEqual(imgSrcs((await app.get(`/a/${art.id}/v/1/`)).text), [`../../../../dl/${art.id}/1`], 'pinned previews its own version');
 });
 
+test('download: the image preview\'s alt is the HTML-escaped title', async (t) => {
+  const app = await startApp(t);
+  const title = `a"b<i>c'd>`;
+  const art = await publish(app, { path: await fixtureFile(t, 'a.png', 'IMG'), title });
+  const { text } = await app.get(`/a/${art.id}/`);
+  const imgs = [...text.matchAll(/<img\b[^>]*>/g)].map((m) => m[0]);
+  assert.equal(imgs.length, 1);
+  assert.equal(/\salt="([^"]*)"/.exec(imgs[0])?.[1], 'a&quot;b&lt;i&gt;c&#39;d&gt;');
+  assert.ok(!text.includes(title), 'the raw title appears nowhere');
+  assert.ok(!text.includes('<i>'), 'the title injects no markup');
+});
+
 test('download: a non-image landing page has no preview', async (t) => {
   const app = await startApp(t);
   const sources = [
