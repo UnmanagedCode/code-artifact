@@ -43,18 +43,57 @@ const rootPrefix = (reqPath) => '../'.repeat(reqPath.split('/').length - 2);
 
 // Leading UTF-8 BOM, whitespace and comments, then the doctype. A comment body cannot span `-->`, so a failed match stays linear.
 const DOCTYPE_RE = /^(?:\xEF\xBB\xBF)?(?:\s|<!--(?:(?!-->)[\s\S])*-->)*<!doctype[^>]*>/i;
+/** How much of an HTML file is read to place the report helper; a doctype that ends past it counts as none. The rest is streamed. */
+export const DOCTYPE_SCAN_BYTES = 64 * 1024;
 
 /**
- * `buf` with `<script src="${src}">` spliced in after the doctype (before it would switch the page to quirks mode), else after a
- * UTF-8 BOM, else first. The offset is found on the latin1 view (one char per byte), so the bytes around it are untouched.
- * A UTF-16 document is returned as is.
+ * Where the report helper's tag goes in a file that starts with `head`: after the doctype (before it would switch the page to
+ * quirks mode), else after a UTF-8 BOM, else first; null for a UTF-16 document, which is served as is. The search runs on the
+ * latin1 view (one char per byte), so the offset is a byte offset and no byte is re-encoded.
  */
-function withReportScript(buf, src) {
-  if (buf.length >= 2 && ((buf[0] === 0xff && buf[1] === 0xfe) || (buf[0] === 0xfe && buf[1] === 0xff))) return buf;
-  const m = DOCTYPE_RE.exec(buf.toString('latin1'));
-  const bom = buf.length >= 3 && buf[0] === 0xef && buf[1] === 0xbb && buf[2] === 0xbf;
-  const at = m ? m[0].length : bom ? 3 : 0;
-  return Buffer.concat([buf.subarray(0, at), Buffer.from(`<script src="${src}"></script>`), buf.subarray(at)]);
+function reportOffset(head) {
+  if (head.length >= 2 && ((head[0] === 0xff && head[1] === 0xfe) || (head[0] === 0xfe && head[1] === 0xff))) return null;
+  const m = DOCTYPE_RE.exec(head.toString('latin1'));
+  if (m) return m[0].length;
+  return head.length >= 3 && head[0] === 0xef && head[1] === 0xbb && head[2] === 0xbf ? 3 : 0;
+}
+
+/**
+ * Sends the HTML file `abs` with `<script src="${src}">` spliced in at `reportOffset`, streaming everything past the scanned head.
+ * Validators come from the file's stat and the served length; a matching conditional request gets a 304, a HEAD the headers only.
+ */
+async function sendHtml(req, res, abs, src) {
+  const fh = await fsp.open(abs, 'r');
+  let streaming = false;
+  try {
+    const st = await fh.stat();
+    const scan = Buffer.alloc(Math.min(st.size, DOCTYPE_SCAN_BYTES));
+    const { bytesRead } = await fh.read(scan, 0, scan.length, 0);
+    const at = reportOffset(scan.subarray(0, bytesRead));
+    const tag = at === null ? Buffer.alloc(0) : Buffer.from(`<script src="${src}"></script>`);
+    const length = st.size + tag.length;
+    res.type(path.extname(abs));
+    res.set({
+      'Content-Length': String(length),
+      ETag: `W/"${length.toString(16)}-${st.mtime.getTime().toString(16)}"`,
+      'Last-Modified': st.mtime.toUTCString(),
+    });
+    if (req.fresh) {
+      res.removeHeader('Content-Type');
+      res.removeHeader('Content-Length');
+      return res.status(304).end();
+    }
+    if (req.method === 'HEAD') return res.end();
+    const head = scan.subarray(0, at ?? 0);
+    res.write(Buffer.concat([head, tag]));
+    const rest = fh.createReadStream({ start: head.length });
+    streaming = true;
+    rest.on('error', (e) => { console.error('code-artifact: raw read failed:', e); res.destroy(e); });
+    res.on('close', () => rest.destroy());
+    return rest.pipe(res);
+  } finally {
+    if (!streaming) await fh.close();
+  }
 }
 
 const insideRoot = (root, p) => p === root || p.startsWith(root + path.sep);
@@ -72,7 +111,7 @@ async function regularFile(contentReal, content, rel) {
 }
 
 /** Serves a static site's file at `sub`; an HTML file gets the report helper `reportSrc` injected. */
-async function serveStatic(res, next, content, sub, reportSrc) {
+async function serveStatic(req, res, next, content, sub, reportSrc) {
   const parsed = safeSegments(sub);
   if (!parsed) return plain(res, 404, 'Not found');
   let contentReal;
@@ -91,10 +130,7 @@ async function serveStatic(res, next, content, sub, reportSrc) {
   if (kind !== 'file') return plain(res, 404, 'Not found');
   // The trusted stance: a static site runs as authored, so the plugin's own CSP is not applied to it.
   res.removeHeader('Content-Security-Policy');
-  if (/\.html?$/i.test(rel)) {
-    const buf = await fsp.readFile(path.join(content, rel));
-    return res.type(path.extname(rel)).send(withReportScript(buf, reportSrc));
-  }
+  if (/\.html?$/i.test(rel)) return sendHtml(req, res, path.join(content, rel), reportSrc);
   // A relative path with `root`: an absolute one makes dotfiles:'deny' refuse a store under a dot-directory.
   return res.sendFile(rel, { root: content, dotfiles: 'deny', cacheControl: false }, (err) => {
     if (err) next(err.status === 404 ? undefined : err);
@@ -174,7 +210,7 @@ export function contentRouter(getStore, apps) {
     const record = await store.get(id);
     if (record?.kind !== 'static' || !record.versions.some((v) => v.n === Number(n))) return plain(res, 404, 'Not found');
     res.set('Cache-Control', PINNED_CACHE);
-    return serveStatic(res, next, path.join(store.versionDir(id, Number(n)), CONTENT), rest, `${rootPrefix(req.path)}_page/report.js`);
+    return serveStatic(req, res, next, path.join(store.versionDir(id, Number(n)), CONTENT), rest, `${rootPrefix(req.path)}_page/report.js`);
   }));
 
   r.get('/dl/:id/:n', wrap(async (req, res, next) => {
