@@ -25,10 +25,11 @@ const head = (prefix, title) => `<!doctype html>
 </head>
 `;
 
-function shell({ prefix, title, header, body }) {
+function shell({ prefix, project, title, header, body }) {
   return `${head(prefix, title)}<body>
 <main class="page">
 <header class="page-head">
+<p class="back">${backLink(prefix, project)}</p>
 <h1>${escapeHtml(title)}</h1>
 ${header}
 </header>
@@ -40,30 +41,34 @@ ${body}
 }
 
 const stamp = (iso) => `<time datetime="${escapeHtml(iso)}">${escapeHtml(iso.slice(0, 16).replace('T', ' '))} UTC</time>`;
+// The overview list filtered to the artifact's project: the same `project` param `parseRoute` (frontend/src/lib/artifacts.ts) reads.
+const backLink = (prefix, project) =>
+  `<a class="btn ghost" href="${escapeHtml(`${prefix}?${new URLSearchParams({ project })}`)}"><span aria-hidden="true">←</span> Artifacts</a>`;
 const downloadLink = (prefix, id, n) => `${prefix}dl/${id}/${n}`;
 
 /** The page for a markdown version: header plus the sanitized, pre-rendered body. */
-export function markdownPage({ prefix, id, version, latest, rendered }) {
+export function markdownPage({ prefix, id, project, version, latest, rendered }) {
   const header = `<p class="meta"><span class="badge">v${version.n} · ${latest ? 'latest' : 'pinned'}</span>
 <a class="btn" href="${downloadLink(prefix, id, version.n)}">Download</a></p>`;
-  return shell({ prefix, title: version.title, header, body: `<article class="md">${rendered}</article>` });
+  return shell({ prefix, project, title: version.title, header, body: `<article class="md">${rendered}</article>` });
 }
 
 /** The landing page for a download version; the attachment itself lives at dl/<id>/<n>. */
-export function downloadPage({ prefix, id, version, latest }) {
+export function downloadPage({ prefix, id, project, version, latest }) {
   const header = `<p class="meta"><span class="badge">v${version.n} · ${latest ? 'latest' : 'pinned'}</span></p>`;
   const body = `<section class="landing">
 <p class="file">${escapeHtml(version.file)}</p>
 <p class="meta">${formatBytes(version.bytes)} · published ${stamp(version.publishedAt)}</p>
 <p><a class="btn primary" href="${downloadLink(prefix, id, version.n)}">Download</a></p>
 </section>`;
-  return shell({ prefix, title: version.title, header, body });
+  return shell({ prefix, project, title: version.title, header, body });
 }
 
 /** The wrapper for a static version: a compact header bar over an iframe (`frameSrc`, a relative raw URL) that shows the site. */
-export function staticPage({ prefix, id, version, latest, frameSrc }) {
+export function staticPage({ prefix, id, project, version, latest, frameSrc }) {
   return `${head(prefix, version.title)}<body class="wrap">
 <header class="bar">
+${backLink(prefix, project)}
 <h1>${escapeHtml(version.title)}</h1>
 <span class="badge">v${version.n} · ${latest ? 'latest' : 'pinned'}</span>
 <a class="btn" href="${downloadLink(prefix, id, version.n)}">Download</a>
@@ -84,9 +89,10 @@ const STATE_TEXT = {
 /**
  * The wrapper for an app: a bar with live status and Start/Stop over an iframe (`frameSrc`, the proxied app) while it runs,
  * else a panel with Start and the log tail. `state` is the host's status for the artifact; `latestN` is the version that runs.
+ * Every page's header starts with a link back to the overview list for the artifact's project.
  * A version other than the latest never runs: it gets a notice and a link to the latest.
  */
-export function appPage({ prefix, id, version, latest, latestN, state, frameSrc }) {
+export function appPage({ prefix, id, project, version, latest, latestN, state, frameSrc }) {
   const runs = version.n === latestN;
   const title = escapeHtml(version.title);
   const badge = `<span class="badge">v${version.n} · ${latest ? 'latest' : 'pinned'}</span>`;
@@ -95,6 +101,7 @@ export function appPage({ prefix, id, version, latest, latestN, state, frameSrc 
   if (!runs) {
     return `${head(prefix, version.title)}<body class="wrap app">
 <header class="bar">
+${backLink(prefix, project)}
 <h1>${title}</h1>
 ${badge}
 ${links}
@@ -121,6 +128,7 @@ ${links}
 </section>`;
   return `${head(prefix, version.title)}<body class="wrap app" data-api="${prefix}api/apps/${id}" data-frame-src="${escapeHtml(frameSrc)}" data-title="${title}" data-status="${state.status}">
 <header class="bar">
+${backLink(prefix, project)}
 <h1>${title}</h1>
 ${badge}
 <span class="badge status" data-role="status" data-tone="${state.status}">${state.status}</span>

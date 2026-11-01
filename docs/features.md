@@ -88,10 +88,12 @@ Deep links look like `http://cc.internal/#plugin/code-artifact/a/<id>/` (latest)
 
 | Kind | What the link shows |
 |---|---|
-| `markdown` | A themed page with the title, `v<n>` (latest or pinned), a Download link, and the rendered document |
-| `static` | A compact header bar (title, `v<n>` latest or pinned, Download) over an iframe that fills the rest of the view and shows the site as authored, same-origin, with its own scripts and styles. A deeper deep link (`…/a/<id>/docs/page.html`) opens that page in the frame |
-| `download` | A landing page with the file name, size, publish time and a Download button |
-| `app` | A bar (title, `v<n>` latest or pinned, live status, Start/Stop, Logs, Download) over an iframe with the running app. While the app is not running, a panel with a large **Start**, the error if any and a live log tail replaces the iframe. Navigation inside the frame is not mirrored to cc's URL |
+| `markdown` | A themed page with **← Artifacts**, the title, `v<n>` (latest or pinned), a Download link, and the rendered document |
+| `static` | A compact header bar (**← Artifacts**, title, `v<n>` latest or pinned, Download) over an iframe that fills the rest of the view and shows the site as authored, same-origin, with its own scripts and styles. A deeper deep link (`…/a/<id>/docs/page.html`) opens that page in the frame |
+| `download` | A landing page with **← Artifacts**, the file name, size, publish time and a Download button |
+| `app` | A bar (**← Artifacts**, title, `v<n>` latest or pinned, live status, Start/Stop, Logs, Download) over an iframe with the running app. While the app is not running, a panel with a large **Start**, the error if any and a live log tail replaces the iframe. Navigation inside the frame is not mirrored to cc's URL |
+
+Every artifact view starts with **← Artifacts**: the overview list filtered to the artifact's project (`?project=<name>`); **Show all** drops the filter. It is a normal navigation, so browser Back returns to the artifact.
 
 Every version can be downloaded from `dl/<id>/<n>`; a static or app version downloads as `<id>-v<n>.tar.gz` (an app's published tree).
 
@@ -102,7 +104,7 @@ The plugin's own page (nav label "Code Artifact"):
 - **List**: artifacts grouped by project (projects by name, artifacts newest first). Each row shows the title, kind, latest version, relative time, the publishing session (its label as plain text, else the 8-character id, else "unknown session"), and an **Open** link. Markdown in the label is stripped and a label longer than `MAX_SESSION_LABEL` (`frontend/src/lib/artifacts.ts`) is cut to at most that many code points, backing up to the last space only when it falls past halfway, with `…` appended. The session text is constrained to its card (truncated in the list, wrapped in the detail), so a long unbroken label never widens the page. An empty state names `publish_artifact`.
 - **App rows and detail**: an app row shows a status badge. An app's detail view adds a panel with the status, **Start**, **Stop**, **Open**, the latest version's `start`, `install` and `prefix`, and the log tail (polled every second while installing or starting, else every 5 s).
 - **Detail** (`?artifact=<id>`): versions newest first, each naming its session as the list does (`sessionText`), with **Open** (pinned), **Download** and **Delete** (a confirm dialog; disabled on the last version), plus **Delete artifact**.
-- **Project filter** (`?project=<name>`): the list shows only that project, under a strip with the name as text and **Show all**. The filter carries through the detail (`?project=<name>&artifact=<id>`); its Back and **Delete artifact** return to the filtered list. With no artifacts in that project, the empty state names it.
+- **Project filter** (`?project=<name>`): the list shows only that project, under a strip with the name as text and **Show all**. The filter carries through the detail (`?project=<name>&artifact=<id>`); its Back and **Delete artifact** return to the filtered list. With no artifacts in that project, the empty state names it. An artifact view's **← Artifacts** arrives at this filtered list.
 - **Delete old…**: deletes versions published more than N days ago, optionally for one project. A live dry-run count is shown first. Every artifact keeps its latest version.
 - Follows cc's light/dark theme and session width; works on a phone.
 

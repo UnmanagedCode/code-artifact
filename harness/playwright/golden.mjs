@@ -193,14 +193,28 @@ try {
         assert.equal(await search(), '?project=demo');
         assert.equal(await page.getByRole('alert').count(), 0, 'Back clears the notice');
 
+        // Every artifact page starts with ← Artifacts; it opens the list filtered to the artifact's project, and Back returns.
+        const backRoundTrip = async (url, project, heading) => {
+          await page.goto(url);
+          await page.getByRole('link', { name: 'Artifacts' }).click();
+          await page.getByRole('heading', { name: 'Code Artifact', level: 1 }).waitFor();
+          await page.getByRole('button', { name: 'Show all' }).waitFor();
+          assert.equal(await page.locator('main').getByText(`Project: ${project}`).count(), 1, `the list is filtered to ${project}`);
+          await page.goBack();
+          await heading.waitFor();
+        };
+        const artifactsLink = page.getByRole('link', { name: 'Artifacts' });
+
         // Server-rendered pages.
         await page.goto(`${world.url}/a/${world.ids.markdown}/`);
         await page.getByRole('heading', { name: 'Release notes', level: 1 }).first().waitFor();
         assert.ok(await page.locator('article.md table').isVisible());
         assert.equal(await page.locator('article.md input[type=checkbox]').count(), 2);
+        await artifactsLink.waitFor();
         await shot('page-markdown');
         await page.goto(`${world.url}/a/${world.ids.download}/`);
         await page.getByRole('link', { name: 'Download' }).waitFor();
+        await artifactsLink.waitFor();
         await shot('page-download');
         await page.goto(`${world.url}/a/${world.ids.static}/`);
         // The wrapper: a compact bar plus an iframe that fills the rest of the viewport and shows the site.
@@ -211,18 +225,23 @@ try {
         assert.ok(Math.abs(frameBox.y + frameBox.height - viewport.height) < 2, 'the iframe fills the viewport');
         assert.ok(Math.abs(frameBox.width - viewport.width) < 2, 'the iframe spans the width');
         assert.match(await page.locator('iframe.site').getAttribute('src'), /^\.\.\/\.\.\/raw\//);
+        await artifactsLink.waitFor();
         await shot('page-static');
+        assert.ok(await fits(), `static page overflows at ${vname} width`);
         // App wrapper: stopped panel, Start, the running frame, then a failed app with its log tail.
         await stopApps();
         await page.goto(`${world.url}/a/${world.ids.app}/`);
         await page.locator('.app-panel [data-role="start"]').waitFor();
         assert.equal(await page.locator('iframe.site').count(), 0);
+        await artifactsLink.waitFor();
         await shot('page-app-stopped');
+        assert.ok(await fits(), `app page overflows at ${vname} width`);
         await page.locator('.app-panel [data-role="start"]').click();
         await page.frameLocator('iframe.site').getByRole('heading', { name: 'App says hi' }).waitFor();
         assert.equal(await page.locator('.badge.status').textContent(), 'running');
         assert.ok(Math.abs((await page.locator('iframe.site').boundingBox()).height + (await page.locator('.bar').boundingBox()).height - viewport.height) < 2, 'the frame fills the viewport');
         await shot('page-app-running');
+        assert.ok(await fits(), `running app page overflows at ${vname} width`);
         // A refused Stop while running shows in the bar and leaves the frame up.
         await page.route('**/api/apps/*/stop', (route) => route.fulfill({ status: 409, contentType: 'application/json', body: '{"error":"stop refused: demo","code":"X"}' }));
         await page.locator('[data-role="toggle"]').click();
@@ -240,6 +259,9 @@ try {
         await page.locator('pre.log', { hasText: 'boom: cannot bind' }).waitFor();
         await shot('page-app-failed');
         await post(`api/apps/${world.ids.failing}/stop`);
+        await backRoundTrip(`${world.url}/a/${world.ids.markdown}/`, 'demo', page.getByRole('heading', { name: 'Release notes', level: 1 }).first());
+        await backRoundTrip(`${world.url}/a/${world.ids.static}/`, 'tools', page.frameLocator('iframe.site').getByRole('heading', { name: 'Demo site' }));
+        await backRoundTrip(`${world.url}/a/${world.ids.app}/`, 'demo', page.locator('.app-panel [data-role="start"]'));
         await page.goto(`${world.url}/a/${world.ids.static}/v/1/`);
         await page.frameLocator('iframe.site').getByRole('heading', { name: 'Demo site' }).waitFor();
         await shot('page-static-pinned');
