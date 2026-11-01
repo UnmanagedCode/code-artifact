@@ -1,5 +1,5 @@
 // Pins the "← Artifacts" link on every server-rendered artifact page: it reaches the overview list filtered to the
-// artifact's project, from any URL depth, and encodes an untrusted project name as one param.
+// artifact's project through a relative href (so it stays under the plugin mount), from any URL depth, and encodes an untrusted project name as one param.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { publish, fixtureFile, fixtureDir } from './_helpers.mjs';
@@ -15,12 +15,16 @@ const backHref = (html) => {
 };
 const caller = { sessionId: 's1', project: 'proj-a' };
 const BASE = 'http://plugin.test';
+const MOUNT = '/plugins/code-artifact';
 
 async function assertBack(app, pagePath, project = 'proj-a') {
   const res = await app.get(pagePath);
   assert.equal(res.status, 200, pagePath);
-  const url = new URL(backHref(res.text), `${BASE}${pagePath}`);
-  assert.equal(url.pathname, '/', `${pagePath} links to the plugin root`);
+  const href = backHref(res.text);
+  assert.doesNotMatch(href, /^(\/|[a-z][a-z0-9+.-]*:)/i, `${pagePath}: the link is relative, not root-absolute or absolute`);
+  // Served under cc's mount, a relative link lands on the plugin root, not on the host root.
+  const url = new URL(href, `${BASE}${MOUNT}${pagePath}`);
+  assert.equal(url.pathname, `${MOUNT}/`, `${pagePath} links to the plugin root`);
   assert.deepEqual(parseRoute(url.search), { view: 'list', project });
 }
 
