@@ -112,7 +112,7 @@ export function contentRouter(getStore, apps) {
 
     // Relative path from this page back to the plugin root: one `../` per directory level of the URL.
     const prefix = '../'.repeat(req.path.split('/').length - 2);
-    const ctx = { prefix, id, version, latest: !pinned };
+    const ctx = { prefix, id, project: record.project, version, latest: !pinned };
     if (record.kind === 'static') {
       // The site itself is served raw and pinned; this page is the plugin-rendered wrapper around it.
       if (!safeSegments(sub)) return plain(res, 404, 'Not found');

@@ -17,6 +17,10 @@ body {
   background: var(--card); color: var(--card-foreground); font-size: 0.875rem; text-decoration: none;
 }
 .btn:hover { background: var(--accent); color: var(--accent-foreground); }
+.btn.ghost { border-color: transparent; background: transparent; color: var(--foreground); }
+.btn.ghost:hover { background: var(--accent); color: var(--accent-foreground); }
+.page-head .back { margin: 0 0 0.5rem; }
+.page-head .back .btn { margin-left: -0.75rem; }
 .btn.primary { background: var(--primary); border-color: var(--primary); color: var(--primary-foreground); }
 .landing { padding: 1rem; border: 1px solid var(--border); border-radius: var(--radius); background: var(--card); color: var(--card-foreground); }
 .landing .file { margin: 0; font-family: 'Geist Mono Variable', ui-monospace, monospace; overflow-wrap: anywhere; }
