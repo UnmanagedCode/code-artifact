@@ -27,7 +27,7 @@ Node ESM backend (Express 4) plus a React/Vite/Tailwind v4 UI, one package. Cont
 | `src/mcp.js` | Tool handlers keyed by manifest tool name; the envelope handler |
 | `src/api.js` | REST router for the UI |
 | `src/serve.js` | `a/…`, `raw/…`, `dl/…`, `_page/…` |
-| `src/pages.js` | Markdown page, download landing page and the static and app wrapper (`staticPage`, `appPage`) templates |
+| `src/pages.js` | Markdown page, download landing page (with the inline image preview, `isPreviewImage`) and the static and app wrapper (`staticPage`, `appPage`) templates |
 | `src/webui.js` | Security headers, JSON-only mutation gate, UI mount, terminal handlers |
 | `src/http.js` | `wrap` (async handler errors), `refusalJson`, `plain` |
 | `assets/page.css` | Styles of the server-rendered pages (tokens only) |
@@ -72,7 +72,7 @@ Node ESM backend (Express 4) plus a React/Vite/Tailwind v4 UI, one package. Cont
 - A file is served only when `lstat` says it is a regular file and its `realpath` stays inside the real `content/` directory.
 - `res.sendFile` gets a relative path with `root`: an absolute path makes `dotfiles:'deny'` refuse everything under the store's dot-directory.
 - A static artifact is two routes: `a/…` answers the wrapper page (`staticPage` in `src/pages.js`), and `raw/<id>/<n>/…` serves the files through the path resolution above. The wrapper exists because cc's `navigate` is only seen by documents that load the bridge and `nav.js`, which a raw site does not. The iframe `src` is relative, with one `../` per directory level of the wrapper's URL, and always names a concrete version.
-- Raw responses drop the CSP header (`res.removeHeader`); everything else keeps it.
+- Raw responses drop the CSP header (`res.removeHeader`); dl/ responses replace it with `DL_CSP` (`src/serve.js`); everything else keeps it.
 - The page assets under `_page/` are served from their one source file each, so the pages render while the UI is unbuilt.
 - cc steers a page it already shows with `navigate` (a `replaceState` plus a synthetic `popstate`, never a load). `frontend/public/nav.js`, loaded by the UI document and by every server-rendered page, reloads when the path changes under the document, and, on a server-rendered page (its `<html>` carries `data-reload-on-search`), when the query changes too; the UI's own query routing and hash-only changes never reload. Without it, opening an artifact from the UI, or a second artifact link while the plugin is docked, would leave stale content.
 - A cc ⋮ menu click (`?ccProject=…`) is query-only from the UI document, so `nav.js` leaves it to the UI's `popstate` handler, which retargets in place and re-fetches the list. From a server-rendered artifact page it is a path change, so `nav.js` reloads and the UI handles the arrival on load. Either way `menuArrival` replaces the cc query with the UI's own route via `history.replaceState`.

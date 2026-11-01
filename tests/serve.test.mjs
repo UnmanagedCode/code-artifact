@@ -1,5 +1,5 @@
 // Pins content serving: latest vs pinned versions and their cache headers, static path resolution and its traversal refusals,
-// the CSP split between pages and static sites, markdown/download pages, attachments, and 404s.
+// the CSP split between pages and static sites, markdown/download pages, attachments, image previews and dl/'s sandbox CSP, and 404s.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fsp from 'node:fs/promises';
@@ -259,6 +259,92 @@ test('dl/ pinned to an older version serves that version', async (t) => {
   await app.mcp('update_artifact', { artifact: art.id, path: await fixtureFile(t, 'b.bin', 'new') });
   assert.equal((await app.get(`/dl/${art.id}/1`)).text, 'old');
   assert.equal((await app.get(`/dl/${art.id}/2`)).text, 'new');
+});
+
+const imgSrcs = (html) => [...html.matchAll(/<img\b[^>]*>/g)].map((m) => /\ssrc="([^"]*)"/.exec(m[0])?.[1]);
+const EVIL_SVG = '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><script>/*EVIL_MARKER*/</script><image href="https://example.invalid/x.png"/></svg>';
+
+test('download: an image\'s landing page previews it from dl/ and keeps Download', async (t) => {
+  const app = await startApp(t);
+  for (const name of ['a.png', 'a.jpg', 'a.JPEG', 'a.gif', 'a.webp', 'a.svg']) {
+    const art = await publish(app, { path: await fixtureFile(t, name, 'IMG'), title: 'Pic' });
+    const latest = await app.get(`/a/${art.id}/`);
+    assert.deepEqual(imgSrcs(latest.text), [`../../dl/${art.id}/1`], name);
+    assert.ok(latest.text.includes(`href="../../dl/${art.id}/1">Download</a>`), name);
+    const pinned = await app.get(`/a/${art.id}/v/1/`);
+    assert.deepEqual(imgSrcs(pinned.text), [`../../../../dl/${art.id}/1`], name);
+    assert.ok(pinned.text.includes(`href="../../../../dl/${art.id}/1">Download</a>`), name);
+  }
+  const art = await publish(app, { path: await fixtureFile(t, 'b.png', 'ONE'), title: 'Pic' });
+  await app.mcp('update_artifact', { artifact: art.id, path: await fixtureFile(t, 'b.png', 'TWO') });
+  assert.deepEqual(imgSrcs((await app.get(`/a/${art.id}/`)).text), [`../../dl/${art.id}/2`], 'latest previews the latest version');
+  assert.deepEqual(imgSrcs((await app.get(`/a/${art.id}/v/1/`)).text), [`../../../../dl/${art.id}/1`], 'pinned previews its own version');
+});
+
+test('download: the image preview\'s alt is the HTML-escaped title', async (t) => {
+  const app = await startApp(t);
+  const title = `a"b<i>c'd>`;
+  const art = await publish(app, { path: await fixtureFile(t, 'a.png', 'IMG'), title });
+  const { text } = await app.get(`/a/${art.id}/`);
+  const imgs = [...text.matchAll(/<img\b[^>]*>/g)].map((m) => m[0]);
+  assert.equal(imgs.length, 1);
+  assert.equal(/\salt="([^"]*)"/.exec(imgs[0])?.[1], 'a&quot;b&lt;i&gt;c&#39;d&gt;');
+  assert.ok(!text.includes(title), 'the raw title appears nowhere');
+  assert.ok(!text.includes('<i>'), 'the title injects no markup');
+});
+
+test('download: a non-image landing page has no preview', async (t) => {
+  const app = await startApp(t);
+  const sources = [
+    ['report.csv', await fixtureFile(t, 'report.csv', 'a,b')], ['a.bmp', await fixtureFile(t, 'a.bmp', 'x')], ['png', await fixtureFile(t, 'png', 'x')],
+    ['x.png.txt', await fixtureFile(t, 'x.png.txt', 'x')], ['shots.png.tar.gz', await fixtureDir(t, { 'x.png': 'x' }, 'shots.png')],
+  ];
+  for (const [file, src] of sources) {
+    const art = await publish(app, { path: src, title: 'File' });
+    const landing = await app.get(`/a/${art.id}/`);
+    assert.ok(!landing.text.includes('<img'), file);
+    assert.ok(landing.text.includes(`<p class="file">${file}</p>`), file);
+    assert.ok(landing.text.includes(`href="../../dl/${art.id}/1">Download</a>`), file);
+  }
+});
+
+test('every previewable extension is served by dl/ as image/*', async (t) => {
+  const { isPreviewImage } = await import('../src/pages.js');
+  const app = await startApp(t);
+  for (const name of ['a.png', 'a.PNG', 'a.jpg', 'a.jpeg', 'a.JPEG', 'a.gif', 'a.webp', 'a.svg']) {
+    assert.ok(isPreviewImage(name), name);
+    const art = await publish(app, { path: await fixtureFile(t, name, 'IMG'), title: 'Pic' });
+    const res = await app.get(`/dl/${art.id}/1`);
+    assert.match(res.headers.get('content-type'), /^image\//, name);
+    assert.equal(res.headers.get('x-content-type-options'), 'nosniff', name);
+  }
+  for (const name of ['a.bmp', 'a.ico', 'a.avif', 'png', 'x.png.txt', 'a.svgz']) assert.ok(!isPreviewImage(name), name);
+});
+
+test('dl/ can\'t render an SVG as a page: attachment, nosniff, sandboxing CSP with no script source', async (t) => {
+  const app = await startApp(t);
+  const svg = await publish(app, { path: await fixtureFile(t, 'evil.svg', EVIL_SVG), title: 'Evil' });
+  const csv = await publish(app, { path: await fixtureFile(t, 'r.csv', 'a'), title: 'Csv' });
+  const site = await publish(app, { path: await fixtureDir(t, SITE), title: 'Site' });
+  for (const url of [`/dl/${svg.id}/1`, `/dl/${csv.id}/1`, `/dl/${site.id}/1`]) {
+    const res = await app.get(url);
+    assert.match(res.headers.get('content-disposition'), /^attachment/, url);
+    assert.equal(res.headers.get('x-content-type-options'), 'nosniff', url);
+    const csp = res.headers.get('content-security-policy');
+    assert.match(csp, /(^|;\s*)sandbox(;|$)/, url);
+    assert.match(csp, /default-src 'none'/, url);
+    for (const bad of ['script-src', "'self'", 'https:']) assert.ok(!csp.includes(bad), `${url}: ${bad}`);
+  }
+});
+
+test('the SVG preview is an <img>, never inlined or embedded', async (t) => {
+  const app = await startApp(t);
+  const art = await publish(app, { path: await fixtureFile(t, 'evil.svg', EVIL_SVG), title: 'Evil' });
+  const landing = await app.get(`/a/${art.id}/`);
+  assert.deepEqual(imgSrcs(landing.text), [`../../dl/${art.id}/1`]);
+  for (const bad of ['<svg', 'EVIL_MARKER', 'example.invalid', '<object', '<embed', '<iframe']) assert.ok(!landing.text.includes(bad), bad);
+  assert.match(landing.headers.get('content-security-policy'), CSP_RE);
+  assert.match(landing.headers.get('content-security-policy'), /script-src 'self'/);
 });
 
 test('unknown ids and versions are 404 plain text, never a stack or a path', async (t) => {

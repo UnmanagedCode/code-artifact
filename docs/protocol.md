@@ -105,10 +105,10 @@ Every non-GET/HEAD/OPTIONS request needs `Content-Type: application/json` (else 
 | `GET a/:id/…`, `a/:id/v/:n/…` (app) | The app wrapper page; `Cache-Control: no-cache` for pinned URLs too (it shows live status). A sub-path with a `..` segment (also percent-encoded) or a backslash is 404; other sub-paths, dot-led included, are forwarded |
 | `* app/:id` | `301` to the relative `<id>/`, query kept |
 | `* app/:id/…` | Reverse-proxied to the running app (below); an app that is not running is `503`, an id that is unknown or not an app is `404`, both plain text with the plugin CSP |
-| `GET dl/:id/:n` | `Content-Disposition: attachment`: the stored file, or a `<id>-v<n>.tar.gz` of a static site's or an app's published tree |
+| `GET dl/:id/:n` | `Content-Disposition: attachment`: the stored file (`Content-Type` from its extension), or a `<id>-v<n>.tar.gz` of a static site's or an app's published tree; a sandboxing CSP (`DL_CSP` in `src/serve.js`: `sandbox; default-src 'none'; …`, no script source) in place of the plugin CSP; `nosniff` |
 | `GET _page/page.css`, `_page/fallback.css`, `_page/theme-init.js`, `_page/nav.js`, `_page/app-page.js` | Assets of the server-rendered pages |
 
-Per kind at the version root: `markdown` and `download` answer a page (any deeper subpath is 404); `static` answers a plugin-rendered wrapper page (the shared page shell: bridge, theme, `nav.js`; a header bar with a relative **Artifacts** link to `?project=<name>`, title, `v<n>` latest or pinned and the Download link; and a same-origin iframe, not sandboxed) at any safe subpath, whose iframe `src` is the relative URL `raw/<id>/<n>/<subpath>` (the current latest `n` for a latest URL; a query string is forwarded). The raw route serves the files: `index.html` for a directory URL, a relative `301` for a directory without a trailing slash, never a listing, never a dotfile. A path segment that is empty, `.`/`..`, dot-led, or holds `/`, `\` or NUL after decoding is 404, as is anything whose real path leaves the version's `content/`.
+Per kind at the version root: `markdown` and `download` answer a page (any deeper subpath is 404; an image download's page embeds `<img src="…dl/<id>/<n>">`, relative, the page's concrete version); `static` answers a plugin-rendered wrapper page (the shared page shell: bridge, theme, `nav.js`; a header bar with a relative **Artifacts** link to `?project=<name>`, title, `v<n>` latest or pinned and the Download link; and a same-origin iframe, not sandboxed) at any safe subpath, whose iframe `src` is the relative URL `raw/<id>/<n>/<subpath>` (the current latest `n` for a latest URL; a query string is forwarded). The raw route serves the files: `index.html` for a directory URL, a relative `301` for a directory without a trailing slash, never a listing, never a dotfile. A path segment that is empty, `.`/`..`, dot-led, or holds `/`, `\` or NUL after decoding is 404, as is anything whose real path leaves the version's `content/`.
 
 ## App proxy
 
@@ -124,7 +124,7 @@ Per kind at the version root: `markdown` and `download` answer a page (any deepe
 ## Headers
 
 - Every response carries `X-Content-Type-Options: nosniff` and the plugin CSP (`securityHeaders` in `src/webui.js`), the 404, 503 and 415 included.
-- **Raw site responses (`raw/…`) and app responses (`app/…`) carry no plugin CSP**: a site runs as authored, and an app carries only the policy it sends itself. The wrapper and every other page keep it, including `frame-src 'self'` for the wrapper's iframe.
+- **Raw site responses (`raw/…`) and app responses (`app/…`) carry no plugin CSP**: a site runs as authored, and an app carries only the policy it sends itself. **Download responses (`dl/…`) replace it with `DL_CSP`**, so an attachment a browser renders top-level (an SVG) gets an opaque origin and no script; its 404s keep the plugin CSP. The wrapper and every other page keep it, including `frame-src 'self'` for the wrapper's iframe.
 - Embedding: `frame-ancestors 'self'`.
 
 ## Deep links

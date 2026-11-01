@@ -1,5 +1,5 @@
 // Golden-path visual check: boots the backend on a seeded sandbox store, drives the list, detail, prune dialog, cc ⋮ menu arrival and
-// the markdown, download and static pages, and saves a screenshot per step in light and dark and at phone width.
+// the markdown, download (CSV, PNG and hostile SVG) and static pages, and saves a screenshot per step in light and dark and at phone width.
 // Run: node harness/playwright/golden.mjs   (needs `npm install` first, for frontend/dist; export CC_PROJECTS_ROOT outside cc)
 import assert from 'node:assert/strict';
 import { mkdirSync } from 'node:fs';
@@ -23,6 +23,7 @@ function watchErrors(page) {
   });
   page.on('response', (r) => { if (r.status() >= 400 && !HOST_URLS.test(r.url()) && !(r.status() === 409 && /\/stop$/.test(r.url()))) failures.push(`${r.status()} ${r.url()}`); });
   page.on('pageerror', (e) => failures.push(`pageerror: ${e.message}`));
+  page.on('request', (r) => { if (!r.url().startsWith(world.url) && !r.url().startsWith('data:')) failures.push(`external request: ${r.url()}`); });
 }
 
 const VIEWS = [
@@ -58,7 +59,7 @@ try {
         await page.getByRole('heading', { name: 'Code Artifact', level: 1 }).waitFor();
         await page.getByRole('link', { name: 'Release notes' }).waitFor();
         assert.deepEqual(await page.locator('section[aria-label] > h2').allTextContents(), ['demo', 'tools']);
-        assert.equal(await page.getByRole('link', { name: 'Open' }).count(), 7);
+        assert.equal(await page.getByRole('link', { name: 'Open' }).count(), 9);
         assert.equal(await page.getByText('Stopped', { exact: true }).count(), 2, 'both app rows show a status badge');
         const plain = 'Operational task: fix the foo parser, see the spec and ship…';
         await page.getByText(plain, { exact: true }).first().waitFor();
@@ -216,6 +217,22 @@ try {
         await page.getByRole('link', { name: 'Download' }).waitFor();
         await artifactsLink.waitFor();
         await shot('page-download');
+        // Image downloads preview inline; the SVG's script never runs and its external image is never fetched.
+        for (const [step, id] of [['page-download-png', world.ids.image], ['page-download-svg', world.ids.svg]]) {
+          await page.goto(`${world.url}/a/${id}/`);
+          const img = page.locator('.landing .preview img');
+          await img.waitFor();
+          await page.waitForFunction(() => document.querySelector('.landing .preview img').complete);
+          assert.ok(await img.evaluate((el) => el.naturalWidth > 0), `${step}: the image decodes`);
+          assert.ok(await page.getByRole('link', { name: 'Download' }).isVisible(), `${step}: Download is visible`);
+          assert.equal(await page.evaluate(() => document.documentElement.dataset.pwned), undefined, `${step}: the SVG's script ran`);
+          assert.ok(await fits(), `${step} overflows at ${vname} width`);
+          await shot(step);
+        }
+        // Opened top-level, dl/ downloads the SVG instead of rendering it.
+        const [svgDownload] = await Promise.all([page.waitForEvent('download'), page.goto(`${world.url}/dl/${world.ids.svg}/1`).catch(() => {})]);
+        assert.equal(svgDownload.suggestedFilename(), 'evil.svg');
+        assert.equal(await page.evaluate(() => document.documentElement.dataset.pwned), undefined, 'the SVG ran when opened top-level');
         await page.goto(`${world.url}/a/${world.ids.static}/`);
         // The wrapper: a compact bar plus an iframe that fills the rest of the viewport and shows the site.
         await page.frameLocator('iframe.site').getByRole('heading', { name: 'Demo site' }).waitFor();

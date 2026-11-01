@@ -4,7 +4,7 @@ A code-conductor (cc) plugin that lets agents publish versioned, immutable artif
 
 ## Functional summary
 
-- Agents publish artifacts of the kinds in `KINDS` (`src/kinds.js`): markdown documents, static sites, downloadable files and dynamic apps (a directory with an `artifact.json` that code-artifact runs on demand, with Start, Stop and logs in the UI).
+- Agents publish artifacts of the kinds in `KINDS` (`src/kinds.js`): markdown documents, static sites, downloadable files (an image previews inline) and dynamic apps (a directory with an `artifact.json` that code-artifact runs on demand, with Start, Stop and logs in the UI).
 - Artifacts are versioned and immutable: a published version is never edited in place.
 - Publishing returns a deep link, `http://cc.internal/#plugin/code-artifact/...`, that opens the artifact in the cc web UI.
 - The plugin's page lists artifacts by project, shows their versions and the publishing session, and bulk-deletes old versions.
