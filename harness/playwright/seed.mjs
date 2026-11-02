@@ -80,7 +80,8 @@ export async function seed() {
 
   const srv = await bootServer({
     cwd: ROOT, entry: 'server.js',
-    sandbox: { dirs: { CODE_ARTIFACT_STORE: 'store' }, env: { CONDUCTOR_URL: '' } },
+    // An empty PROJECTS_ROOT makes the boot migration a no-op, so no real legacy store moves into the sandbox.
+    sandbox: { dirs: { CONDUCTOR_PLUGIN_DATA_DIR: 'store' }, env: { CONDUCTOR_URL: '', PROJECTS_ROOT: '' } },
   });
   const mcp = async (tool, args, project = 'demo') => {
     const res = await fetch(`${srv.url}/api/mcp`, {
@@ -103,13 +104,13 @@ export async function seed() {
   const svg = await mcp('publish_artifact', { path: path.join(files, 'evil.svg'), title: 'Hostile SVG' });
 
   // Backdate version 1 of the markdown artifact (the server reads artifact.json per request).
-  const record = path.join(srv.sandbox.dirs.CODE_ARTIFACT_STORE, 'artifacts', md.id, 'artifact.json');
+  const record = path.join(srv.sandbox.dirs.CONDUCTOR_PLUGIN_DATA_DIR, 'artifacts', md.id, 'artifact.json');
   const json = JSON.parse(fs.readFileSync(record, 'utf8'));
   json.versions[0].publishedAt = new Date(Date.now() - 90 * 86_400_000).toISOString();
   fs.writeFileSync(record, JSON.stringify(json));
 
   // MCP publishes in this sandbox with no session label, so the markdown-label version is created through the store.
-  const store = await Store.open(srv.sandbox.dirs.CODE_ARTIFACT_STORE);
+  const store = await Store.open(srv.sandbox.dirs.CONDUCTOR_PLUGIN_DATA_DIR);
   const staging = await store.newStaging();
   fs.mkdirSync(path.join(staging, 'content'));
   fs.writeFileSync(path.join(staging, 'content', 'label.csv'), 'a,b\n1,2\n');

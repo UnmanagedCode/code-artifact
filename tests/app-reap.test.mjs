@@ -66,8 +66,9 @@ test('SIGTERM to the backend stops its apps and exits 0', async (t) => {
   storeDir = path.join(await tmp(t), 'store');
   const port = await freePort();
   const root = fileURLToPath(new URL('..', import.meta.url));
-  const env = { ...process.env, CODE_ARTIFACT_STORE: storeDir, PORT: String(port) };
+  const env = { ...process.env, CONDUCTOR_PLUGIN_DATA_DIR: storeDir, PORT: String(port) };
   delete env.CONDUCTOR_URL;
+  delete env.PROJECTS_ROOT; // an inherited projects root would migrate the real legacy store into this test store
   backend = spawn(process.execPath, ['server.js'], { cwd: root, env, stdio: ['ignore', 'pipe', 'pipe'] });
   let output = '';
   backend.stdout.on('data', (d) => { output += d; });

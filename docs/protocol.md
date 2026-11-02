@@ -64,7 +64,7 @@ The UI document (`/`) routes on its query string (`parseRoute`, `routeSearch` an
 | `VERSION_UNKNOWN` | 404 | No such version |
 | `LAST_VERSION` | 409 | Deleting an artifact's only version |
 | `CC_UNREACHABLE` | 502 | cc could not answer the project check |
-| `STORE_UNCONFIGURED` | 503 | Neither `CODE_ARTIFACT_STORE` nor `PROJECTS_ROOT` is set |
+| `STORE_UNCONFIGURED` | 503 | `CONDUCTOR_PLUGIN_DATA_DIR` is unset, empty or not an absolute path |
 | `UNSUPPORTED_MEDIA_TYPE` | 415 | REST only: a mutating request without a JSON content type |
 
 ## REST (for the UI)
