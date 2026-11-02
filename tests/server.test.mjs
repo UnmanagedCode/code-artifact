@@ -32,18 +32,19 @@ async function run(t, env) {
   return { port, out: () => out, child };
 }
 
-function runToExit(t, env) {
+async function runToExit(t, env) {
+  const port = await freePort();
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, ['server.js'], {
       cwd: ROOT, stdio: ['ignore', 'pipe', 'pipe'],
-      env: { PATH: process.env.PATH, PORT: '0', ...env },
+      env: { PATH: process.env.PATH, PORT: String(port), ...env },
     });
     t.after(() => child.kill('SIGKILL'));
     let out = '';
     child.stdout.on('data', (d) => { out += d; });
     child.stderr.on('data', (d) => { out += d; });
     child.on('error', reject);
-    child.on('exit', (code) => resolve({ code, out }));
+    child.on('close', (code) => resolve({ code, out }));
   });
 }
 
