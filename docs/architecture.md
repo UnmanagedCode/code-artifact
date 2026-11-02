@@ -43,7 +43,7 @@ Node ESM backend (Express 4) plus a React/Vite/Tailwind v4 UI, one package. Cont
 - Unset, empty or relative: `start()` logs a warning and boots with `storeDir` null; `getStore` then answers 503 `STORE_UNCONFIGURED` (built by `storeUnconfigured`) and no migration runs.
 - `migrateLegacyStore` (called in `start()` between `storeRoot()` and `createServer`) moves `<PROJECTS_ROOT>/.code-artifact` to the data dir with a single `rename`, which keeps modes. It is the only code that names the legacy path.
 - No-ops: `PROJECTS_ROOT` unset or empty (`'no-root'`), no legacy dir (`'absent'`), legacy path equal to the data dir (`'same'`).
-- An empty target dir is replaced; missing parents are created with the same mode `Store.open` gives a fresh store's parents.
+- An empty target dir is replaced; missing parents are created with the explicit mode `migrateLegacyStore` passes to `mkdir` (umask can only narrow it).
 - Refusals: a non-empty target, a non-directory at either end (a symlinked legacy counts), EXDEV (the message gives an `mv` command), inspect/create errors. Each names both paths and throws `ESTOREMIGRATE`.
 - A refusal exits 1 before listening (the direct-run guard in `server.js`). It never moves or changes store data; it may leave the empty parents it created, and a removed empty target stays removed.
 - Known gap: app processes orphaned by a crashed earlier backend carry the old store realpath in `CODE_ARTIFACT_RUN`, so boot reaping no longer matches them after the move. A clean cc stop has already stopped them.
