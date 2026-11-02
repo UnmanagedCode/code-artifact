@@ -12,7 +12,7 @@
     "tools": [
       {
         "name": "publish_artifact",
-        "description": "Publish a file or directory as a new immutable, versioned artifact and get a link the user can open in cc. The kind is inferred from the source: a .md file is markdown; a .html file, or a directory/.tar.gz with a root index.html, is a static site; a directory/.tar.gz with a root artifact.json ({start, install?, prefix?}) is an app that code-artifact runs for the user: it is published stopped and the user starts it from the link, so publish the source without node_modules; anything else is a downloadable file. Pass project when called from the conductor (its own project is not a user project). A static or app page can send JSON back to the publishing session with `ccArtifact.report(data)` (injected into static HTML; an app loads `/plugins/code-artifact/_page/report.js`), which resolves `{ok, code}`.",
+        "description": "Publish a file or directory as a new immutable, versioned artifact and get a link the user can open in cc. The kind is inferred from the source: a .md file is markdown; a .html file, or a directory/.tar.gz with a root index.html, is a static site; a directory/.tar.gz with a root artifact.json ({start, install?, prefix?}) is an app that code-artifact runs for the user: it is published stopped and the user starts it from the link, so publish the source without node_modules; anything else is a downloadable file. Pass project when called from the conductor (its own project is not a user project). To get results back from the user, a static or app page calls `ccArtifact.report(data)` (injected into static HTML; an app loads `/plugins/code-artifact/_page/report.js`), which arrives as a prompt in the publishing session and resolves `{ok, code}`; see docs/protocol.md.",
         "inputSchema": {
           "type": "object",
           "properties": {
@@ -20,14 +20,14 @@
             "title": { "type": "string", "minLength": 1, "maxLength": 200, "description": "Human title shown in the artifact list." },
             "kind": { "type": "string", "enum": ["markdown", "static", "download", "app"], "description": "Override the inferred kind; the source must fit it (app needs a root artifact.json)." },
             "project": { "type": "string", "pattern": "^[a-zA-Z0-9._-]+$", "maxLength": 100, "description": "Owning project. Defaults to the calling session's project; required from the conductor." },
-            "sessionId": { "type": "string", "minLength": 1, "maxLength": 200, "description": "Publishing session. Defaults to the calling session." }
+            "sessionId": { "type": "string", "minLength": 1, "maxLength": 200, "description": "Publishing session; this session receives the version's `ccArtifact.report` data. Defaults to the calling session." }
           },
           "required": ["path", "title"]
         }
       },
       {
         "name": "update_artifact",
-        "description": "Publish a new version of an existing artifact from a new source. Earlier versions stay available. The source must be of the artifact's kind; the project cannot change.",
+        "description": "Publish a new version of an existing artifact from a new source. Earlier versions stay available. The source must be of the artifact's kind; the project cannot change. The new version's pages report back as described in publish_artifact, to the session named by sessionId.",
         "inputSchema": {
           "type": "object",
           "properties": {
@@ -35,7 +35,7 @@
             "path": { "type": "string", "minLength": 1, "maxLength": 4096, "description": "Absolute path of the new source." },
             "title": { "type": "string", "minLength": 1, "maxLength": 200, "description": "New title; omit to keep the current one." },
             "kind": { "type": "string", "enum": ["markdown", "static", "download", "app"], "description": "Pass the artifact's kind when the source would otherwise be inferred as another." },
-            "sessionId": { "type": "string", "minLength": 1, "maxLength": 200, "description": "Publishing session. Defaults to the calling session." }
+            "sessionId": { "type": "string", "minLength": 1, "maxLength": 200, "description": "Publishing session; this session receives the version's `ccArtifact.report` data. Defaults to the calling session." }
           },
           "required": ["artifact", "path"]
         }
