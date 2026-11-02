@@ -2,8 +2,8 @@ import express from 'express';
 import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { storeRoot, ccUrl } from './src/config.js';
-import { Refusal } from './src/refusal.js';
+import { storeRoot, storeUnconfigured, ccUrl } from './src/config.js';
+import { migrateLegacyStore } from './src/migrateLegacyStore.js';
 import { Store } from './src/store.js';
 import { createCc } from './src/cc.js';
 import { createAppHost } from './src/appHost.js';
@@ -21,7 +21,7 @@ import { DEFAULT_DIST, jsonOnlyMutations, mountUi, securityHeaders, terminalHand
 export async function createServer({ storeDir, distDir = DEFAULT_DIST, ccUrl: cc = null, limits, mount, appTimings } = {}) {
   const store = storeDir ? await Store.open(storeDir) : null;
   const getStore = () => {
-    if (!store) throw new Refusal('STORE_UNCONFIGURED', 'set CODE_ARTIFACT_STORE or PROJECTS_ROOT');
+    if (!store) throw storeUnconfigured();
     return store;
   };
   const apps = createAppHost({ store: getStore, storeDir, mount, timings: appTimings });
@@ -52,6 +52,7 @@ export async function start({ port = Number(process.env.PORT) || 7500, host = '1
   } catch (e) {
     console.warn(`code-artifact: ${e.message}; the API will answer 503 STORE_UNCONFIGURED`);
   }
+  if (storeDir) await migrateLegacyStore({ env: process.env, dataDir: storeDir });
   const server = await createServer({ storeDir, ccUrl: ccUrl() });
   await new Promise((resolve, reject) => {
     server.once('error', reject);

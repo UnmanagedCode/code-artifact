@@ -6,8 +6,9 @@ Node ESM backend (Express 4) plus a React/Vite/Tailwind v4 UI, one package. Cont
 
 | Module | Responsibility |
 |---|---|
-| `server.js` | `createServer({storeDir, distDir, ccUrl, limits, mount, appTimings})` wires the pieces and reaps orphans; `start()` listens on `127.0.0.1:$PORT` (default 7500), prints the `readyWhen` line and stops every app on SIGTERM/SIGINT |
-| `src/config.js` | `storeRoot()` (`CODE_ARTIFACT_STORE`, else `$PROJECTS_ROOT/.code-artifact`), `ccUrl()` (`CONDUCTOR_URL`) |
+| `server.js` | `createServer({storeDir, distDir, ccUrl, limits, mount, appTimings})` wires the pieces and reaps orphans; `start()` runs `migrateLegacyStore` before `createServer`, then listens on `127.0.0.1:$PORT` (default 7500), prints the `readyWhen` line and stops every app on SIGTERM/SIGINT |
+| `src/config.js` | `storeRoot()` (`CONDUCTOR_PLUGIN_DATA_DIR` only; `STORE_UNCONFIGURED` via `storeUnconfigured`), `ccUrl()` (`CONDUCTOR_URL`) |
+| `src/migrateLegacyStore.js` | `migrateLegacyStore({env, dataDir, rename, log})`: the one-shot boot move of the legacy store |
 | `src/refusal.js` | `Refusal` and `CODES` (code → REST status) |
 | `src/limits.js` | `LIMITS`: byte, file-count and markdown-size caps; injectable in tests |
 | `src/links.js` | `PLUGIN_ID`, `MOUNT`, `appBasePath`, `ID_RE`, `deepLink` |
@@ -35,6 +36,18 @@ Node ESM backend (Express 4) plus a React/Vite/Tailwind v4 UI, one package. Cont
 | `assets/report.js` | `ccArtifact.report()` inside an artifact page: serializes, posts to the wrapper, resolves with its answer or `TIMEOUT` |
 | `assets/relay.js` | The wrapper's side of reports: frame/origin check, limits (`MAX_REPORT_BYTES`, `RATE_LIMIT`, `RATE_WINDOW_MS`, `DEADLINE_MS`), prompt framing, `ccBridge.sendPrompt` |
 | `frontend/` | The UI, per the plugin UI reference setup; `frontend/src/lib/artifacts.ts` holds the pure logic, including the route helpers `parseRoute`, `routeSearch` and `menuArrival` |
+
+## Store location and migration
+
+- `storeRoot()` reads `CONDUCTOR_PLUGIN_DATA_DIR` only; there is no override and no fallback. cc sets it and never creates the dir; the plugin does.
+- Unset, empty or relative: `start()` logs a warning and boots with `storeDir` null; `getStore` then answers 503 `STORE_UNCONFIGURED` (built by `storeUnconfigured`) and no migration runs.
+- `migrateLegacyStore` (called in `start()` between `storeRoot()` and `createServer`) moves `<PROJECTS_ROOT>/.code-artifact` to the data dir with a single `rename`, which keeps modes. It is the only code that names the legacy path.
+- No-ops: `PROJECTS_ROOT` unset or empty (`'no-root'`), no legacy dir (`'absent'`), legacy path equal to the data dir (`'same'`).
+- An empty target dir is replaced; missing parents are created with the explicit mode `migrateLegacyStore` passes to `mkdir` (umask can only narrow it).
+- Refusals: a non-empty target, a non-directory at either end (a symlinked legacy counts), EXDEV (the message gives an `mv` command), inspect/create errors. Each names both paths and throws `ESTOREMIGRATE`.
+- A refusal exits 1 before listening (the direct-run guard in `server.js`). It never moves or changes store data; it may leave the empty parents it created, and a removed empty target stays removed.
+- Known gap: app processes orphaned by a crashed earlier backend carry the old store realpath in `CODE_ARTIFACT_RUN`, so boot reaping no longer matches them after the move. A clean cc stop has already stopped them.
+- Gotcha: a spawned `server.js` must not inherit a real `PROJECTS_ROOT`; `tests/app-reap.test.mjs` and `harness/playwright/seed.mjs` clear it.
 
 ## Store on disk
 
@@ -99,6 +112,6 @@ Node ESM backend (Express 4) plus a React/Vite/Tailwind v4 UI, one package. Cont
 
 ## Tests
 
-App tests start real child processes from a dependency-free fixture app (`tests/fixtures/app-server.cjs`, options in its `fixture.json`) on ephemeral ports. `tests/_apps.mjs` holds the helpers: `startApps` injects short `appTimings` (`TIMINGS`), every wait is `waitFor` against a deadline, and `startApp`'s teardown awaits `server.apps.shutdown()` before the store is removed. `app-reap.test.mjs` also spawns `node server.js` to pin the SIGTERM path; tests that run real app processes tear them down before their store is removed (teardown registered before `tmp()`), and the SIGTERM test reaps by marker (`reapStore`) because a SIGKILLed backend cannot stop its app.
+App tests start real child processes from a dependency-free fixture app (`tests/fixtures/app-server.cjs`, options in its `fixture.json`) on ephemeral ports. `tests/_apps.mjs` holds the helpers: `startApps` injects short `appTimings` (`TIMINGS`), every wait is `waitFor` against a deadline, and `startApp`'s teardown awaits `server.apps.shutdown()` before the store is removed. `app-reap.test.mjs` also spawns `node server.js` to pin the SIGTERM path (the backend gets `CONDUCTOR_PLUGIN_DATA_DIR` and has `PROJECTS_ROOT` removed); tests that run real app processes tear them down before their store is removed (teardown registered before `tmp()`), and the SIGTERM test reaps by marker (`reapStore`) because a SIGKILLed backend cannot stop its app.
 
 `npm test` runs `tests/run.mjs`, a programmatic `node:test` runner. Each test builds its own temp store and starts the app on port 0 (`startApp` in `tests/_helpers.mjs`); a fake cc (`fakeCc`) stands in for the conductor and `rawTarball` builds hostile archives. Pure UI logic is tested by importing `frontend/src/lib/artifacts.ts` directly. `npm run typecheck` checks the UI.

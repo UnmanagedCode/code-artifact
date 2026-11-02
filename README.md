@@ -23,7 +23,7 @@ npm run typecheck
 
 ## Key defaults
 
-- **Store**: `$PROJECTS_ROOT/.code-artifact/`; `CODE_ARTIFACT_STORE` overrides it. With neither set, the API answers `503 STORE_UNCONFIGURED` and the UI still loads.
+- **Store**: `$CONDUCTOR_PLUGIN_DATA_DIR` (cc sets it to `<projectsRoot>/.code-conductor/plugins/data/code-artifact`; standalone, set it to an absolute dir). Unset, empty or relative: the API answers `503 STORE_UNCONFIGURED` and the UI still loads. A store at the legacy path is moved there once at boot ([details](docs/architecture.md#store-location-and-migration)).
 - **Port**: 7500, loopback only.
 - **Caps**: byte, file-count and markdown-size limits per publish, in `LIMITS` (`src/limits.js`).
 
