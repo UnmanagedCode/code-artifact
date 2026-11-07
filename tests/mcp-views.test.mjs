@@ -143,10 +143,22 @@ test('list_artifacts text names every artifact with its link and latest version,
   for (const a of all) {
     assert.equal(text.split('\n').filter((l) => l.startsWith(`${a.id}  "`)).length, 1, `exactly one row for ${a.id}`);
   }
-  assert.match(text.split('\n')[0], new RegExp(`^${all.length} artifacts, newest first`), 'one header leads the rows');
+  assert.match(text.split('\n')[0], new RegExp(`^${all.length} artifacts?, newest first`), 'one header leads the rows');
+  const appRow = text.split('\n').find((l) => l.startsWith(`${ids.app}  "`));
+  assert.match(appRow, /app\.status stopped/, 'an app row reports its live status');
   assert.match(text, /get_artifact/, 'the cut is announced along with how to get the rest');
   const md = all.find((a) => a.id === ids.md);
   assert.ok(!text.includes(md.versions[0].versionLink), 'an older version is left to get_artifact');
+});
+
+test('a count of one renders singular: one artifact, one version', async (t) => {
+  const app = await startApp(t);
+  const pub = await structured(app, 'publish_artifact', { path: await fixtureFile(t, 'one.md', '# one'), title: 'One' });
+  const text = await textOf(app, 'list_artifacts', {});
+  assert.match(text.split('\n')[0], /^1 artifact, newest first/);
+  const row = text.split('\n').find((l) => l.startsWith(`${pub.id}  "`));
+  assert.match(row, /\(1 version\)/);
+  assert.match(await textOf(app, 'get_artifact', { artifact: pub.id }), /^1 version, oldest first:$/m);
 });
 
 test('list_artifacts text answers an empty store and an empty filter', async (t) => {
@@ -162,6 +174,13 @@ test('get_artifact text lists every version with its link, and the live state of
   for (const v of record.versions) assert.ok(text.includes(v.versionLink), `v${v.n}`);
   assert.ok(text.includes(ids.md));
   assert.ok(text.includes('Fix the parser'), 'the session label is used when there is one');
+  const download = await structured(app, 'get_artifact', { artifact: ids.file });
+  const dlText = (await textOf(app, 'get_artifact', { artifact: ids.file })).split('\n');
+  for (const v of download.versions) {
+    assert.ok(v.file, 'a download version stores a file');
+    const line = dlText.find((l) => l.startsWith(`v${v.n}  `));
+    assert.ok(line.includes(`file ${v.file}`), `v${v.n} line names its stored file`);
+  }
   assert.match(await textOf(app, 'get_artifact', { artifact: ids.app }), /app\.status: stopped/);
   assert.match(await textOf(app, 'get_artifact', { artifact: ids.html }), /unknown session/);
 });
