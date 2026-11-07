@@ -106,10 +106,12 @@ Every non-GET/HEAD/OPTIONS request needs `Content-Type: application/json` (else 
 | `* app/:id` | `301` to the relative `<id>/`, query kept |
 | `* app/:id/…` | Reverse-proxied to the running app (below); an app that is not running is `503`, an id that is unknown or not an app is `404`, both plain text with the plugin CSP |
 | `GET dl/:id/:n` | `Content-Disposition: attachment`: the stored file (`Content-Type` from its extension), or a `<id>-v<n>.tar.gz` of a static site's or an app's published tree; a sandboxing CSP (`DL_CSP` in `src/serve.js`: `sandbox; default-src 'none'; …`, no script source) in place of the plugin CSP; `nosniff` |
-| `GET _page/page.css`, `_page/fallback.css`, `_page/theme-init.js`, `_page/nav.js`, `_page/app-page.js`, `_page/relay.js` | Assets of the server-rendered pages |
+| `GET _page/page.css`, `_page/fallback.css`, `_page/theme-init.js`, `_page/nav.js`, `_page/app-page.js`, `_page/relay.js`, `_page/update-check.js` | Assets of the server-rendered pages |
 | `GET _page/report.js` | The `ccArtifact.report()` helper for artifact pages (see **Artifact reports**) |
 
 Per kind at the version root: `markdown` and `download` answer a page (any deeper subpath is 404; an image download's page embeds `<img src="…dl/<id>/<n>">`, relative, the page's concrete version); `static` answers a plugin-rendered wrapper page (the shared page shell: bridge, theme, `nav.js`; a header bar with a relative **Artifacts** link to `?project=<name>`, title, `v<n>` latest or pinned and the Download link; and a same-origin iframe, not sandboxed) at any safe subpath, whose iframe `src` is the relative URL `raw/<id>/<n>/<subpath>` (the current latest `n` for a latest URL; a query string is forwarded). The raw route serves the files: `index.html` for a directory URL, a relative `301` for a directory without a trailing slash, never a listing, never a dotfile. A path segment that is empty, `.`/`..`, dot-led, or holds `/`, `\` or NUL after decoding is 404, as is anything whose real path leaves the version's `content/`.
+
+A latest page (`a/<id>/…` with no `v/<n>`, every kind) carries `data-update-api` (the relative URL of `api/artifacts/<id>`) and `data-shown-version` (its `n`) on `<body>`, an always-present empty `<div data-role="update" role="status">`, and `<script src="…_page/update-check.js" defer>`. The script polls `GET api/artifacts/:id` (`cache: 'no-store'`): the last entry of `versions` is the latest; the shown `n` absent from `versions` means it was deleted; `404` with `code: ARTIFACT_UNKNOWN` is final and stops the polling; any other status, a non-JSON body or a network error changes nothing. A pinned page carries none of these.
 
 ## Artifact reports
 

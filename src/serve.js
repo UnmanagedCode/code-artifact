@@ -17,6 +17,7 @@ const PAGE_ASSETS = {
   'theme-init.js': [path.join(ROOT, 'frontend', 'public'), 'theme-init.js'],
   'nav.js': [path.join(ROOT, 'frontend', 'public'), 'nav.js'],
   'app-page.js': [path.join(ROOT, 'assets'), 'app-page.js'],
+  'update-check.js': [path.join(ROOT, 'assets'), 'update-check.js'],
   'report.js': [path.join(ROOT, 'assets'), 'report.js'],
   'relay.js': [path.join(ROOT, 'assets'), 'relay.js'],
 };
