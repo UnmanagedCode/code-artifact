@@ -6,6 +6,7 @@ import { PLUGIN_ID } from '../src/links.js';
 import { createTools } from '../src/mcp.js';
 import { KINDS } from '../src/kinds.js';
 import { startApp } from './_helpers.mjs';
+import { checkSchema } from './_jsonSchemaSubset.mjs';
 
 const manifest = JSON.parse(await fsp.readFile(new URL('../conductor.plugin.json', import.meta.url), 'utf8'));
 const ALLOWED_PROP_KEYS = new Set(['type', 'enum', 'minLength', 'maxLength', 'pattern', 'minimum', 'maximum', 'description']);
@@ -37,6 +38,40 @@ test('kind enums equal the supported kinds', () => {
   }
 });
 
+const byName = (name) => manifest.mcp.tools.find((t) => t.name === name);
+
+test('every tool declares an outputSchema inside cc\'s subset with an object root', () => {
+  for (const tool of manifest.mcp.tools) {
+    assert.ok(tool.outputSchema, `${tool.name} has no outputSchema`);
+    checkSchema(tool.outputSchema);
+    assert.equal(tool.outputSchema.type, 'object', tool.name);
+  }
+});
+
+test('the inlined schema copies cannot drift: list items equal get, publish equals update', () => {
+  assert.deepEqual(byName('list_artifacts').outputSchema.properties.artifacts.items, byName('get_artifact').outputSchema);
+  assert.deepEqual(byName('publish_artifact').outputSchema, byName('update_artifact').outputSchema);
+});
+
+test('every kind enum in an outputSchema equals the supported kinds', () => {
+  const found = [];
+  const walk = (node) => {
+    if (Array.isArray(node)) return node.forEach(walk);
+    if (node === null || typeof node !== 'object') return;
+    if (node.properties?.kind?.enum) found.push(node.properties.kind.enum);
+    Object.values(node).forEach(walk);
+  };
+  manifest.mcp.tools.forEach((t) => walk(t.outputSchema));
+  assert.ok(found.length >= 3);
+  for (const e of found) assert.deepEqual(e, KINDS);
+});
+
+test('tool descriptions are format-neutral: they promise no output shape', () => {
+  for (const tool of manifest.mcp.tools) {
+    assert.doesNotMatch(tool.description, /\bJSON\b|\breturns? (text|prose)\b|\bstructured(Content)?\b/, tool.name);
+  }
+});
+
 test('the manifest tool names equal the handler names', () => {
   assert.deepEqual(manifest.mcp.tools.map((t) => t.name).sort(), Object.keys(createTools({})).sort());
 });
@@ -44,7 +79,7 @@ test('the manifest tool names equal the handler names', () => {
 test('the declared healthPath and mcp endpoint exist on the server', async (t) => {
   const app = await startApp(t);
   assert.equal((await app.get(manifest.backend.healthPath)).status, 200);
-  const res = await app.raw('POST', manifest.mcp.endpoint, { tool: 'list_artifacts', arguments: {}, caller: {} });
+  const res = await app.raw('POST', manifest.mcp.endpoint, { tool: 'list_artifacts', arguments: {}, caller: {}, format: 'json' });
   assert.equal(res.status, 200);
   assert.ok(manifest.mcp.timeoutMs <= 120000);
 });

@@ -20,15 +20,15 @@ test('a published app is kind app with its manifest stored and status stopped on
   assert.deepEqual(rest.versions[0].app, { start: 'node server.js', install: 'true', prefix: 'keep' });
   assert.equal((await app.get('/api/artifacts')).data.artifacts[0].app.status, 'stopped');
 
-  const got = (await app.mcp('get_artifact', { artifact: pub.id })).data.result;
+  const got = (await app.mcp('get_artifact', { artifact: pub.id })).data.structured;
   assert.equal(got.app.status, 'stopped');
-  const listed = (await app.mcp('list_artifacts', {})).data.result.artifacts[0];
+  const listed = (await app.mcp('list_artifacts', {})).data.structured.artifacts[0];
   assert.equal(listed.app.status, 'stopped');
 });
 
 test('a non-app artifact carries no app status', async (t) => {
   const app = await startApp(t);
-  const pub = (await app.mcp('publish_artifact', { path: await appSource(t, { files: { 'index.html': 'x' } }), title: 's', kind: 'static' })).data.result;
+  const pub = (await app.mcp('publish_artifact', { path: await appSource(t, { files: { 'index.html': 'x' } }), title: 's', kind: 'static' })).data.structured;
   assert.equal(pub.app, undefined);
   assert.equal((await app.get(`/api/artifacts/${pub.id}`)).data.app, undefined);
 });

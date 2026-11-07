@@ -13,8 +13,8 @@ import { TIMINGS, appSource, markerPids, pidGone, publishApp, recordedPid, runAp
 
 const update = async (t, app, id, opts) => {
   const res = await app.mcp('update_artifact', { artifact: id, path: await appSource(t, opts) });
-  if (res.data.error) throw new Error(res.data.error);
-  return res.data.result;
+  if (res.data.error) throw new Error(`${res.data.code}: ${res.data.error}`);
+  return res.data.structured;
 };
 const echo = async (app, id) => (await fetch(`${app.base}/app/${id}/echo`)).json();
 
@@ -63,7 +63,7 @@ test('deleting a running artifact kills its processes and removes its data and l
   const grandchild = await recordedPid(app.storeDir, pub.id, 'grandchild.pid');
 
   const res = await app.mcp('delete_artifact', { artifact: pub.id });
-  assert.deepEqual(res.data.result, { deleted: 'artifact', id: pub.id });
+  assert.deepEqual(res.data.structured, { deleted: 'artifact', id: pub.id });
   await pidGone(pid);
   await pidGone(grandchild);
   await assert.rejects(fsp.access(path.join(app.storeDir, 'artifacts', pub.id)));

@@ -627,7 +627,7 @@ test('the static wrapper names the viewed version\'s publisher and loads the rel
 test('a version with no sessionId carries an empty publisher attribute', async (t) => {
   const app = await startApp(t);
   const { data } = await app.mcp('publish_artifact', { path: await fixtureDir(t, { 'index.html': 'x' }), title: 'Site' }, { project: 'proj-a' });
-  assert.equal(attr((await app.get(`/a/${data.result.id}/`)).text, 'data-publisher-session'), '');
+  assert.equal(attr((await app.get(`/a/${data.structured.id}/`)).text, 'data-publisher-session'), '');
 });
 
 test('the running app wrapper carries the attributes and the relay; proxied app HTML is never rewritten', async (t) => {

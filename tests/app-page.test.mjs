@@ -82,7 +82,7 @@ test('a pinned link to an older version does not run: a notice and a link to the
   const app = await startApps(t);
   const pub = await publishApp(t, app, { version: '1' });
   const upd = await app.mcp('update_artifact', { artifact: pub.id, path: await appSource(t, { version: '2' }) });
-  assert.equal(upd.data.result.version, 2);
+  assert.equal(upd.data.structured.version, 2);
   const { text } = await page(app, `/a/${pub.id}/v/1/`);
   assert.equal(attr(text, 'data-api'), null);
   assert.equal(frameSrc(text), null);

@@ -78,7 +78,7 @@ export function createOps({ store: storeOrGetter, cc, apps, limits = LIMITS }) {
     const info = await inspectSource(args.path, args.kind, limits);
     const kind = resolveKind(info, args.kind);
     if (storedKind && kind !== storedKind) {
-      throw new Refusal('KIND_CHANGE', `the source looks like kind "${kind}" but the artifact is "${storedKind}"; pass kind:"${storedKind}" if that is what the source is`);
+      throw new Refusal('KIND_CHANGE', `the source looks like kind "${kind}" but the artifact is "${storedKind}"; pass kind:"${storedKind}" if that is what the source is`, { sourceKind: kind, artifactKind: storedKind });
     }
     const staging = await store.newStaging();
     try {
