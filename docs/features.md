@@ -6,6 +6,8 @@ What a user and an agent see. Interface contracts are in [protocol.md](protocol.
 
 An agent publishes a local file, directory or `.tar.gz` with the `publish_artifact` MCP tool and gets a deep link. Artifacts are immutable and versioned: `update_artifact` adds a version, earlier versions stay.
 
+Every tool answers in both formats cc asks for. JSON is the complete data, shaped by the tool's `outputSchema` in the manifest. Text is prose for agents; there `list_artifacts` shows each artifact's latest version and points at `get_artifact` for all of them. A refusal carries its code in both.
+
 ### Kind inference
 
 | Source | Kind | Notes |
