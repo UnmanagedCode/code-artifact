@@ -121,11 +121,11 @@ test('publish and update text keep the identifiers a caller acts on', async (t) 
   const { app, ids } = await corpus(t);
   const text = await textOf(app, 'publish_artifact', { path: await fixtureFile(t, 'y.md', '# y'), title: 'Y' });
   const published = (await structured(app, 'list_artifacts', { project: 'proj-a', kind: 'markdown' })).artifacts.find((a) => a.title === 'Y');
-  for (const needle of [published.id, published.link, published.versions[0].versionLink, 'sess-1']) assert.ok(text.includes(needle), needle);
+  for (const needle of [published.id, published.link, published.versions[0].versionLink, 'sess-1', `(version ${published.versions[0].n})`]) assert.ok(text.includes(needle), needle);
   const up = await textOf(app, 'update_artifact', { artifact: ids.md, path: await fixtureFile(t, 'z.md', '# z') });
   const after = await structured(app, 'get_artifact', { artifact: ids.md });
   const latest = after.versions.at(-1);
-  for (const needle of [ids.md, String(latest.n), latest.versionLink, after.link]) assert.ok(up.includes(needle), needle);
+  for (const needle of [ids.md, `Published version ${latest.n} of artifact ${ids.md}`, latest.versionLink, after.link]) assert.ok(up.includes(needle), needle);
   const appUp = await textOf(app, 'update_artifact', { artifact: ids.app, path: await appSource(t, { version: '3' }) });
   assert.match(appUp, /app\.status: stopped/);
 });
@@ -139,6 +139,7 @@ test('list_artifacts text names every artifact with its link and latest version,
     assert.ok(text.includes(a.link), a.id);
     assert.ok(text.includes(`latest v${a.versions.at(-1).n}`), a.id);
   }
+  assert.equal(text.split('\n').length, 1 + all.length, 'a header plus exactly one row per artifact');
   assert.match(text, /get_artifact/, 'the cut is announced along with how to get the rest');
   const md = all.find((a) => a.id === ids.md);
   assert.ok(!text.includes(md.versions[0].versionLink), 'an older version is left to get_artifact');
@@ -164,7 +165,9 @@ test('get_artifact text lists every version with its link, and the live state of
 test('delete_artifact text names the artifact and the version', async (t) => {
   const { app, ids } = await corpus(t);
   const version = await textOf(app, 'delete_artifact', { artifact: ids.md, version: 4 });
-  assert.ok(version.includes(ids.md) && version.includes('4'));
+  assert.ok(version.includes(ids.md));
+  assert.match(version, /Deleted version 4 of artifact /);
+  assert.match(version, /latest version is now 3\b/);
   const whole = await textOf(app, 'delete_artifact', { artifact: ids.md });
   assert.ok(whole.includes(ids.md));
 });
