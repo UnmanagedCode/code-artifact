@@ -119,8 +119,9 @@ test('delete_artifact json answers each branch of its schema', async (t) => {
 
 test('publish and update text keep the identifiers a caller acts on', async (t) => {
   const { app, ids } = await corpus(t);
-  const text = await textOf(app, 'publish_artifact', { path: await fixtureFile(t, 'y.md', '# y'), title: 'Y' });
-  const published = (await structured(app, 'list_artifacts', { project: 'proj-a', kind: 'markdown' })).artifacts.find((a) => a.title === 'Y');
+  const text = await textOf(app, 'publish_artifact', { path: await fixtureDir(t, { 'index.html': '<p>xxxxx', 'a.css': 'yyy' }), title: 'Y' });
+  // The version, file count and byte count all differ here, so the version needle can only come from the version field.
+  const published = (await structured(app, 'list_artifacts', { project: 'proj-a', kind: 'static' })).artifacts.find((a) => a.title === 'Y');
   for (const needle of [published.id, published.link, published.versions[0].versionLink, 'sess-1', `(version ${published.versions[0].n})`]) assert.ok(text.includes(needle), needle);
   const up = await textOf(app, 'update_artifact', { artifact: ids.md, path: await fixtureFile(t, 'z.md', '# z') });
   const after = await structured(app, 'get_artifact', { artifact: ids.md });
@@ -139,7 +140,10 @@ test('list_artifacts text names every artifact with its link and latest version,
     assert.ok(text.includes(a.link), a.id);
     assert.ok(text.includes(`latest v${a.versions.at(-1).n}`), a.id);
   }
-  assert.equal(text.split('\n').length, 1 + all.length, 'a header plus exactly one row per artifact');
+  for (const a of all) {
+    assert.equal(text.split('\n').filter((l) => l.startsWith(`${a.id}  "`)).length, 1, `exactly one row for ${a.id}`);
+  }
+  assert.match(text.split('\n')[0], new RegExp(`^${all.length} artifacts, newest first`), 'one header leads the rows');
   assert.match(text, /get_artifact/, 'the cut is announced along with how to get the rest');
   const md = all.find((a) => a.id === ids.md);
   assert.ok(!text.includes(md.versions[0].versionLink), 'an older version is left to get_artifact');
