@@ -16,6 +16,7 @@ function fakeTimers() {
   let next = 1;
   return {
     setTimeout: (fn) => { pending.set(next, fn); return next++; },
+    get calls() { return next - 1; },
     clearTimeout: (id) => { pending.delete(id); },
     get count() { return pending.size; },
     fire() { const fns = [...pending.values()]; pending.clear(); for (const fn of fns) fn(); },
@@ -190,8 +191,9 @@ test('a 200 landing after the terminal 404 leaves the deleted notice and no time
   assert.equal(p.timers.count, 0);
 });
 
-// Pins: a superseded request's failure neither schedules a duplicate timer nor disturbs the newest.
-test('an older request failing after a newer success schedules no extra timer', async () => {
+// Pins: a superseded request's failure does not re-arm polling. `schedule()` clears before it sets, so the pending count
+// cannot show a stray re-arm; the total number of setTimeout calls can: an unguarded stale failure would make one more.
+test('an older request failing after a newer success does not re-arm polling', async () => {
   const old = defer();
   const recent = defer();
   const p = load({ answers: [old.promise, recent.promise] });
@@ -199,8 +201,10 @@ test('an older request failing after a newer success schedules no extra timer', 
   await p.visible();
   recent.resolve(resp(200, record(1, 2)));
   await flush();
+  const armed = p.timers.calls;
   old.resolve(resp(503, { code: 'X' }));
   await flush();
+  assert.equal(p.timers.calls, armed, 'the stale failure set no timer');
   assert.match(p.notice.textContent, /v2/);
   assert.equal(p.timers.count, 1);
 });
