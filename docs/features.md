@@ -95,6 +95,23 @@ Deep links look like `http://cc.internal/#plugin/code-artifact/a/<id>/` (latest)
 
 Every artifact view starts with **← Artifacts**: the overview list filtered to the artifact's project (`?project=<name>`); **Show all** drops the filter. It is a normal navigation, so browser Back returns to the artifact.
 
+### Updates while viewing
+
+A latest view (`a/<id>/`, any kind) checks for a new version every `POLL_MS` (`assets/update-check.js`) while the page is visible, and at once when the tab becomes visible again. It never switches by itself; the notice sits in the page head (markdown, download) or as a strip under the bar (static, app).
+
+| What the check finds | Notice | Then |
+|---|---|---|
+| A newer latest version | `Updated to v<m>.` with **View update** | Keeps checking; further updates replace the text with the newest `v<m>`, one notice and one button |
+| The shown version was deleted | `v<n> was deleted.` with **View v<m>** | Keeps checking |
+| The artifact was deleted | `This artifact was deleted.`, no button | Stops checking |
+| The plugin unreachable or any other failure | Unchanged | Retries on the next check |
+
+- **View update** reloads the page, which shows whatever is latest at that moment.
+- A pinned view (`a/<id>/v/<n>/`) never checks and has no notice.
+- The UI's detail view is unchanged.
+- An app that runs is already restarted on the new version by `update_artifact`, so the app inside the frame serves the new code whatever the notice says; **View update** refreshes the header, version badge, Download link and report target.
+- On a static site, **View update** opens the page the URL names, not the page last reached by clicking inside the frame (the same limit as deep links).
+
 ### Reporting back to the publishing session
 
 A static site or app page can send data back to the session that published the version you are viewing, with `ccArtifact.report(data)` (a static site has it automatically; an app loads `/plugins/code-artifact/_page/report.js`). The session receives the JSON in a prompt that labels it untrusted artifact data. The call resolves `{ok: true}` or `{ok: false, code}`.

@@ -59,7 +59,7 @@ try {
         await page.getByRole('heading', { name: 'Code Artifact', level: 1 }).waitFor();
         await page.getByRole('link', { name: 'Release notes' }).waitFor();
         assert.deepEqual(await page.locator('section[aria-label] > h2').allTextContents(), ['demo', 'tools']);
-        assert.equal(await page.getByRole('link', { name: 'Open' }).count(), 9);
+        assert.equal(await page.getByRole('link', { name: 'Open' }).count(), 11);
         assert.equal(await page.getByText('Stopped', { exact: true }).count(), 2, 'both app rows show a status badge');
         const plain = 'Operational task: fix the foo parser, see the spec and ship…';
         await page.getByText(plain, { exact: true }).first().waitFor();
@@ -313,6 +313,33 @@ try {
         await page.goto(`${world.url}/a/${world.ids.static}/v/1/`);
         await page.frameLocator('iframe.site').getByRole('heading', { name: 'Demo site' }).waitFor();
         await shot('page-static-pinned');
+        // Update notice: a latest view hears of a new version, names the newest, and switches only on click.
+        for (const [key, step, ready] of [
+          ['liveNotes', 'page-update-markdown', () => page.locator('article.md').waitFor()],
+          ['liveSite', 'page-update-static', () => page.frameLocator('iframe.site').getByRole('heading', { name: 'Live site' }).waitFor()],
+        ]) {
+          const check = () => page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+          await page.goto(`${world.url}/a/${world.ids[key]}/`);
+          await ready();
+          // Located by role attribute, not getByRole: an empty region is display:none and so absent from the accessibility tree.
+          const status = page.locator('[role=status][data-role=update]');
+          assert.equal((await status.textContent()).trim(), '', `${step}: no notice while current`);
+          assert.equal(await status.isVisible(), false, `${step}: the empty region is hidden`);
+          const first = await world.bump(key);
+          await check();
+          const viewUpdate = page.getByRole('button', { name: 'View update' });
+          await viewUpdate.waitFor();
+          assert.match(await status.textContent(), new RegExp(`v${first}\\b`));
+          await shot(step);
+          assert.ok(await fits(), `${step} overflows at ${vname} width`);
+          const second = await world.bump(key);
+          await check();
+          await status.getByText(`v${second}.`).waitFor();
+          assert.equal(await page.getByRole('button', { name: 'View update' }).count(), 1, `${step}: one notice, one button`);
+          await viewUpdate.click();
+          await page.getByText(`v${second} · latest`).waitFor();
+          assert.equal((await status.textContent()).trim(), '', `${step}: the notice is gone after the switch`);
+        }
       }, { headless: true, viewport });
     }
   }

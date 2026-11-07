@@ -25,17 +25,23 @@ const head = (prefix, title) => `<!doctype html>
 </head>
 `;
 
-function shell({ prefix, project, title, header, body }) {
-  return `${head(prefix, title)}<body>
+// A latest page polls its artifact's record (assets/update-check.js); a pinned page is one immutable version and never does.
+// The live region is always rendered, empty and hidden by `:empty`: a region inserted at the moment of change is not announced.
+const updateAttrs = (prefix, id, n) => ` data-update-api="${escapeHtml(`${prefix}api/artifacts/${id}`)}" data-shown-version="${escapeHtml(n)}"`;
+const UPDATE_NOTICE = '<div class="update-notice" data-role="update" role="status"></div>';
+const updateScript = (prefix) => `<script src="${prefix}_page/update-check.js" defer></script>\n`;
+
+function shell({ prefix, project, title, header, body, update = null }) {
+  return `${head(prefix, title)}<body${update ? updateAttrs(prefix, update.id, update.n) : ''}>
 <main class="page">
 <header class="page-head">
 <p class="back">${backLink(prefix, project)}</p>
 <h1>${escapeHtml(title)}</h1>
 ${header}
-</header>
+${update ? `${UPDATE_NOTICE}\n` : ''}</header>
 ${body}
 </main>
-</body>
+${update ? updateScript(prefix) : ''}</body>
 </html>
 `;
 }
@@ -54,7 +60,7 @@ export const isPreviewImage = (name) => PREVIEW_IMAGE.test(name);
 export function markdownPage({ prefix, id, project, version, latest, rendered }) {
   const header = `<p class="meta"><span class="badge">v${version.n} · ${latest ? 'latest' : 'pinned'}</span>
 <a class="btn" href="${downloadLink(prefix, id, version.n)}">Download</a></p>`;
-  return shell({ prefix, project, title: version.title, header, body: `<article class="md">${rendered}</article>` });
+  return shell({ prefix, project, title: version.title, header, body: `<article class="md">${rendered}</article>`, update: latest ? { id, n: version.n } : null });
 }
 
 /**
@@ -71,7 +77,7 @@ ${preview}<p class="file">${escapeHtml(version.file)}</p>
 <p class="meta">${formatBytes(version.bytes)} · published ${stamp(version.publishedAt)}</p>
 <p><a class="btn primary" href="${downloadLink(prefix, id, version.n)}">Download</a></p>
 </section>`;
-  return shell({ prefix, project, title: version.title, header, body });
+  return shell({ prefix, project, title: version.title, header, body, update: latest ? { id, n: version.n } : null });
 }
 
 /** What `_page/relay.js` reads: the viewed version and the session that published it (empty when none was recorded). */
@@ -83,7 +89,7 @@ const relayScript = (prefix) => `<script src="${prefix}_page/relay.js"></script>
 
 /** The wrapper for a static version: a compact header bar over an iframe (`frameSrc`, a relative raw URL) that shows the site. */
 export function staticPage({ prefix, id, project, version, latest, frameSrc }) {
-  return `${head(prefix, version.title)}<body class="wrap"${reportAttrs(version, id)}>
+  return `${head(prefix, version.title)}<body class="wrap"${reportAttrs(version, id)}${latest ? updateAttrs(prefix, id, version.n) : ''}>
 ${relayScript(prefix)}
 <header class="bar">
 ${backLink(prefix, project)}
@@ -91,8 +97,8 @@ ${backLink(prefix, project)}
 <span class="badge">v${version.n} · ${latest ? 'latest' : 'pinned'}</span>
 <a class="btn" href="${downloadLink(prefix, id, version.n)}">Download</a>
 </header>
-<iframe class="site" title="${escapeHtml(version.title)}" src="${escapeHtml(frameSrc)}"></iframe>
-</body>
+${latest ? `${UPDATE_NOTICE}\n` : ''}<iframe class="site" title="${escapeHtml(version.title)}" src="${escapeHtml(frameSrc)}"></iframe>
+${latest ? updateScript(prefix) : ''}</body>
 </html>
 `;
 }
@@ -144,7 +150,7 @@ ${links}
 <p><button type="button" class="btn primary" data-role="start"${active ? ' hidden' : ''}>Start</button></p>
 <pre class="log" data-role="log" aria-label="App log"></pre>
 </section>`;
-  return `${head(prefix, version.title)}<body class="wrap app" data-api="${prefix}api/apps/${id}" data-frame-src="${escapeHtml(frameSrc)}" data-title="${title}" data-status="${state.status}"${reportAttrs(version, id)}>
+  return `${head(prefix, version.title)}<body class="wrap app" data-api="${prefix}api/apps/${id}" data-frame-src="${escapeHtml(frameSrc)}" data-title="${title}" data-status="${state.status}"${reportAttrs(version, id)}${latest ? updateAttrs(prefix, id, version.n) : ''}>
 ${relayScript(prefix)}
 <header class="bar">
 ${backLink(prefix, project)}
@@ -154,12 +160,12 @@ ${badge}
 <button type="button" class="btn" data-role="toggle">${active ? 'Stop' : 'Start'}</button>
 ${links}
 </header>
-<p class="bar-error" data-role="action-error" role="alert" hidden></p>
+${latest ? `${UPDATE_NOTICE}\n` : ''}<p class="bar-error" data-role="action-error" role="alert" hidden></p>
 <div class="stage" data-role="stage">
 ${stage}
 </div>
 <script src="${prefix}_page/app-page.js" defer></script>
-</body>
+${latest ? updateScript(prefix) : ''}</body>
 </html>
 `;
 }

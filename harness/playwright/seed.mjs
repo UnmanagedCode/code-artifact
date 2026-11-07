@@ -1,5 +1,5 @@
 // Boots the backend on a sandboxed store and publishes one artifact of each kind (two apps: one that runs, one that fails) and two
-// image downloads (a PNG and a hostile SVG) over MCP, plus a second markdown version, then backdates the first so the prune dialog has something to count.
+// image downloads (a PNG and a hostile SVG) over MCP, two artifacts for the update notice (`bump` publishes a new version of one), plus a second markdown version, then backdates the first so the prune dialog has something to count.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -103,6 +103,21 @@ export async function seed() {
   const image = await mcp('publish_artifact', { path: path.join(files, 'chart.png'), title: 'Chart' });
   const svg = await mcp('publish_artifact', { path: path.join(files, 'evil.svg'), title: 'Hostile SVG' });
 
+  // Two artifacts the update-notice steps bump: `bump(key)` publishes a fresh version and returns its number.
+  const liveNotes = await mcp('publish_artifact', { path: path.join(files, 'notes.md'), title: 'Live notes' });
+  fs.mkdirSync(path.join(files, 'live-site'));
+  fs.writeFileSync(path.join(files, 'live-site', 'index.html'), '<!doctype html><title>Live</title><h1>Live site</h1>');
+  const liveSite = await mcp('publish_artifact', { path: path.join(files, 'live-site'), title: 'Live site' });
+  const live = { liveNotes, liveSite };
+  let bumps = 0;
+  const bump = async (key) => {
+    const n = ++bumps;
+    const source = key === 'liveNotes' ? path.join(files, `bump-${n}.md`) : path.join(files, `bump-${n}`);
+    if (key === 'liveNotes') fs.writeFileSync(source, `${MARKDOWN}\nBump ${n}.\n`);
+    else { fs.mkdirSync(source); fs.writeFileSync(path.join(source, 'index.html'), `<!doctype html><title>Live</title><h1>Live site</h1><p>Bump ${n}</p>`); }
+    return (await mcp('update_artifact', { artifact: live[key].id, path: source })).version;
+  };
+
   // Backdate version 1 of the markdown artifact (the server reads artifact.json per request).
   const record = path.join(srv.sandbox.dirs.CONDUCTOR_PLUGIN_DATA_DIR, 'artifacts', md.id, 'artifact.json');
   const json = JSON.parse(fs.readFileSync(record, 'utf8'));
@@ -129,7 +144,8 @@ export async function seed() {
 
   return {
     url: srv.url,
-    ids: { unbroken: unbroken.id, labelled: labelled.id, markdown: md.id, static: site.id, download: dl.id, image: image.id, svg: svg.id, app: app.id, failing: failing.id },
+    ids: { unbroken: unbroken.id, labelled: labelled.id, markdown: md.id, static: site.id, download: dl.id, image: image.id, svg: svg.id, app: app.id, failing: failing.id, liveNotes: liveNotes.id, liveSite: liveSite.id },
+    bump,
     close: async () => { await srv.close(); fs.rmSync(files, { recursive: true, force: true }); },
   };
 }
