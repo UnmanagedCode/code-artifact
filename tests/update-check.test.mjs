@@ -153,6 +153,58 @@ test('transient failures leave the notice unchanged and retry', async () => {
   assert.equal(p.fetched.length, 5);
 });
 
+const defer = () => { let resolve; const promise = new Promise((r) => { resolve = r; }); return { promise, resolve }; };
+
+// Pins (b): only the newest request's response is applied; an older request resolving later never overwrites it.
+test('an older response landing after a newer one does not override it', async () => {
+  const old = defer();
+  const recent = defer();
+  const p = load({ answers: [old.promise, recent.promise] });
+  p.timers.fire(); // request 1, left in flight
+  await p.visible(); // request 2 supersedes it
+  recent.resolve(resp(200, record(1, 2, 3)));
+  await flush();
+  assert.match(p.notice.textContent, /v3/);
+  old.resolve(resp(200, record(1, 2)));
+  await flush();
+  assert.match(p.notice.textContent, /v3/);
+  assert.doesNotMatch(p.notice.textContent, /v2/);
+  assert.equal(p.timers.count, 1, 'only the newest request schedules the next poll');
+});
+
+// Pins (a): after the terminal state, a late response from an older request changes nothing and schedules nothing.
+test('a 200 landing after the terminal 404 leaves the deleted notice and no timer', async () => {
+  const old = defer();
+  const recent = defer();
+  const p = load({ answers: [old.promise, recent.promise] });
+  p.timers.fire();
+  await p.visible();
+  recent.resolve(resp(404, { code: 'ARTIFACT_UNKNOWN' }));
+  await flush();
+  const gone = p.notice.textContent;
+  assert.notEqual(gone, '');
+  old.resolve(resp(200, record(1, 2)));
+  await flush();
+  assert.equal(p.notice.textContent, gone);
+  assert.equal(p.notice.buttons().length, 0);
+  assert.equal(p.timers.count, 0);
+});
+
+// Pins: a superseded request's failure neither schedules a duplicate timer nor disturbs the newest.
+test('an older request failing after a newer success schedules no extra timer', async () => {
+  const old = defer();
+  const recent = defer();
+  const p = load({ answers: [old.promise, recent.promise] });
+  p.timers.fire();
+  await p.visible();
+  recent.resolve(resp(200, record(1, 2)));
+  await flush();
+  old.resolve(resp(503, { code: 'X' }));
+  await flush();
+  assert.match(p.notice.textContent, /v2/);
+  assert.equal(p.timers.count, 1);
+});
+
 // Pins: hidden tabs do not poll; becoming visible checks at once.
 test('hidden at tick: no fetch, no timer; visibilitychange to visible fetches immediately', async () => {
   const p = load({ hidden: true, answers: [resp(200, record(1, 2))] });

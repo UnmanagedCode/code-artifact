@@ -321,10 +321,13 @@ try {
           const check = () => page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
           await page.goto(`${world.url}/a/${world.ids[key]}/`);
           await ready();
-          // Located by role attribute, not getByRole: an empty region is display:none and so absent from the accessibility tree.
-          const status = page.locator('[role=status][data-role=update]');
+          const status = page.getByRole('status');
+          assert.equal(await status.count(), 1, `${step}: the empty region stays in the accessibility tree`);
           assert.equal((await status.textContent()).trim(), '', `${step}: no notice while current`);
-          assert.equal(await status.isVisible(), false, `${step}: the empty region is hidden`);
+          const box = await status.boundingBox();
+          assert.ok(box.width <= 1 && box.height <= 1, `${step}: the empty region is visually hidden`);
+          const style = await status.evaluate((el) => { const c = getComputedStyle(el); return [c.position, c.paddingTop, c.paddingBottom, c.borderTopWidth, c.borderBottomWidth]; });
+          assert.deepEqual(style, ['absolute', '0px', '0px', '0px', '0px'], `${step}: the empty region takes no layout space`);
           const first = await world.bump(key);
           await check();
           const viewUpdate = page.getByRole('button', { name: 'View update' });

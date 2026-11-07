@@ -8,6 +8,7 @@
   var shown = Number(body.getAttribute('data-shown-version'));
   var timer = null;
   var done = false;
+  var generation = 0;
   var rendered = '';
 
   function schedule() {
@@ -53,10 +54,15 @@
   function tick() {
     timer = null;
     if (document.hidden) return;
+    // A request in flight cannot be cancelled: only the newest one's outcome is applied or schedules the next poll.
+    var mine = ++generation;
+    var current = function () { return mine === generation && !done; };
     fetch(api, { cache: 'no-store' })
-      .then(function (res) { return res.json().then(function (data) { decide(res.status, data); }, function () {}); })
+      .then(function (res) {
+        return res.json().then(function (data) { if (current()) decide(res.status, data); }, function () {});
+      })
       .catch(function () {})
-      .then(schedule);
+      .then(function () { if (current()) schedule(); });
   }
 
   document.addEventListener('visibilitychange', function () {

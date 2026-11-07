@@ -26,7 +26,7 @@ const head = (prefix, title) => `<!doctype html>
 `;
 
 // A latest page polls its artifact's record (assets/update-check.js); a pinned page is one immutable version and never does.
-// The live region is always rendered, empty and hidden by `:empty`: a region inserted at the moment of change is not announced.
+// The live region is always rendered, empty and visually hidden by `:empty` (kept in the accessibility tree): a region inserted or unhidden at the moment of change is not announced.
 const updateAttrs = (prefix, id, n) => ` data-update-api="${escapeHtml(`${prefix}api/artifacts/${id}`)}" data-shown-version="${escapeHtml(n)}"`;
 const UPDATE_NOTICE = '<div class="update-notice" data-role="update" role="status"></div>';
 const updateScript = (prefix) => `<script src="${prefix}_page/update-check.js" defer></script>\n`;

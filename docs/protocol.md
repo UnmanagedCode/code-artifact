@@ -111,6 +111,8 @@ Every non-GET/HEAD/OPTIONS request needs `Content-Type: application/json` (else 
 
 Per kind at the version root: `markdown` and `download` answer a page (any deeper subpath is 404; an image download's page embeds `<img src="…dl/<id>/<n>">`, relative, the page's concrete version); `static` answers a plugin-rendered wrapper page (the shared page shell: bridge, theme, `nav.js`; a header bar with a relative **Artifacts** link to `?project=<name>`, title, `v<n>` latest or pinned and the Download link; and a same-origin iframe, not sandboxed) at any safe subpath, whose iframe `src` is the relative URL `raw/<id>/<n>/<subpath>` (the current latest `n` for a latest URL; a query string is forwarded). The raw route serves the files: `index.html` for a directory URL, a relative `301` for a directory without a trailing slash, never a listing, never a dotfile. A path segment that is empty, `.`/`..`, dot-led, or holds `/`, `\` or NUL after decoding is 404, as is anything whose real path leaves the version's `content/`.
 
+A latest page (`a/<id>/…` with no `v/<n>`, every kind) carries `data-update-api` (the relative URL of `api/artifacts/<id>`) and `data-shown-version` (its `n`) on `<body>`, an always-present empty `<div data-role="update" role="status">`, and `<script src="…_page/update-check.js" defer>`. The script polls `GET api/artifacts/:id` (`cache: 'no-store'`): the last entry of `versions` is the latest; the shown `n` absent from `versions` means it was deleted; `404` with `code: ARTIFACT_UNKNOWN` is final and stops the polling; any other status, a non-JSON body or a network error changes nothing. A pinned page carries none of these.
+
 ## Artifact reports
 
 A static or app page calls `ccArtifact.report(data)` to send JSON to the session that published the **viewed version**. The wrapper (`a/…`) relays it through cc's `ccBridge.sendPrompt`. One attempt: no inbox, no storage, no retry, no backend call.
@@ -123,8 +125,6 @@ A static or app page calls `ccArtifact.report(data)` to send JSON to the session
 | App | Not injected. Load `/plugins/code-artifact/_page/report.js` (standalone: `/_page/report.js`; an app CSP must allow it under `script-src 'self'`), or speak the messages below directly |
 
 **`report(data)`** always resolves, never rejects: `{ok: true}` or `{ok: false, code}`. `data` goes through `JSON.stringify`; a throw or a non-string result is `INVALID_DATA` and nothing is posted.
-
-A latest page (`a/<id>/…` with no `v/<n>`, every kind) carries `data-update-api` (the relative URL of `api/artifacts/<id>`) and `data-shown-version` (its `n`) on `<body>`, an always-present empty `<div data-role="update" role="status">`, and `<script src="…_page/update-check.js" defer>`. The script polls `GET api/artifacts/:id` (`cache: 'no-store'`): the last entry of `versions` is the latest; the shown `n` absent from `versions` means it was deleted; `404` with `code: ARTIFACT_UNKNOWN` is final and stops the polling; any other status, a non-JSON body or a network error changes nothing. A pinned page carries none of these.
 
 **Messages** (envelope `{ccArtifact: 1, type, id, …}`, `id` a string unique per page):
 
