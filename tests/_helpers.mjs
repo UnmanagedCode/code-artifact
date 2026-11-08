@@ -5,6 +5,7 @@ import path from 'node:path';
 import zlib from 'node:zlib';
 import * as tar from 'tar';
 import { createServer } from '../server.js';
+import { checkReply } from './_mcpContract.mjs';
 
 /** A fresh temp dir, removed when the test ends. */
 export async function tmp(t, prefix = 'ca-test-') {
@@ -138,16 +139,21 @@ export async function startApp(t, { ccUrl = null, limits, distDir, storeDir, unc
     get: (url) => send('GET', url),
     post: (url, body) => send('POST', url, body),
     del: (url) => send('DELETE', url, undefined),
-    mcp: (tool, args, caller = { sessionId: 'sess-1', project: 'proj-a' }) => send('POST', '/api/mcp', { tool, arguments: args, caller }),
+    /** An MCP call in `format` (default json; null omits the key, as an old cc does). Every reply is checked against the reply contract. */
+    mcp: async (tool, args, caller = { sessionId: 'sess-1', project: 'proj-a' }, format = 'json') => {
+      const res = await send('POST', '/api/mcp', { tool, arguments: args, caller, ...(format === null ? {} : { format }) });
+      checkReply(tool, format ?? 'text', res.status, res.data);
+      return res;
+    },
     raw: send,
   };
 }
 
-/** Publishes through the MCP endpoint and returns the result, failing on an error. */
+/** Publishes through the MCP endpoint and returns the structured result, failing on a refusal. */
 export async function publish(app, args, caller) {
   const { data } = await app.mcp('publish_artifact', args, caller);
-  if (data.error) throw new Error(data.error);
-  return data.result;
+  if (data.error) throw new Error(`${data.code}: ${data.error}`);
+  return data.structured;
 }
 
 /** GET with the request line exactly as given: fetch() normalises `..` and `%2e%2e` away. Resolves `{status, body}`. */

@@ -19,21 +19,25 @@ The UI document (`/`) routes on its query string (`parseRoute`, `routeSearch` an
 
 ## MCP wire contract
 
-- cc POSTs `{tool, arguments, caller:{sessionId, project}}` to `/api/mcp`.
-- A well-formed call always answers `200`: `{result}` or `{error:"<CODE>: <message>"}` (MCP errors are plain strings, so the refusal code is the message prefix). An unknown tool is `200 {error:"unknown tool <name>"}`.
-- A malformed envelope (no string `tool`) answers `400`.
+- cc POSTs `{tool, arguments, caller:{sessionId, project}, format}` to `/api/mcp`. `format` is `"json"` or `"text"`; an absent `format` is text (a cc that predates typed tools never sends one).
+- A well-formed call answers `200` with one of:
+  - json success: `{structured}`, shaped by the tool's `outputSchema` in the manifest;
+  - text success: `{text}`, one prose string (no `meta`);
+  - a refusal, identical in both formats: `{error, code, details?}`; `error` is the bare message, with no `<CODE>: ` prefix.
+- An unknown tool is `TOOL_UNKNOWN`; an unexpected failure is `INTERNAL` with the message `internal error` (the cause is logged, never echoed).
+- A malformed envelope (no string `tool`) or a `format` other than `"text"` / `"json"` answers `400`.
 - `caller.project` is `.conduct` for a conductor session; a dot-leading project name is treated as no project.
 - The schemas are in the manifest and stay inside cc's validator subset. `ops.js` repeats the checks and refuses unknown keys with `INVALID_ARGUMENT`.
 
 ### Tools
 
-| Tool | Arguments (required in **bold**) | Result |
-|---|---|---|
-| `publish_artifact` | **path**, **title**, kind, project, sessionId | `{id, title, kind, project, version, sessionId, link, versionLink, bytes, files}`; an app adds `app:{status}` |
-| `update_artifact` | **artifact**, **path**, title, kind, sessionId | the same shape, `version` = the new number; for an app, `app.status` is after the restart of an active app |
-| `list_artifacts` | project, kind | `{artifacts:[{id, title, kind, project, versions, latest:{version, publishedAt, sessionId, sessionLabel}, link, app?}]}`, newest first; `latest.sessionLabel` is the stored label, not the display-cleaned one |
-| `get_artifact` | **artifact** | the stored record plus `link` and a `versionLink` per version; an app record adds `app:{status, version, error, since}` |
-| `delete_artifact` | **artifact**, version | `{deleted:"artifact", id}` or `{deleted:"version", id, version, latest}` |
+| Tool | Arguments (required in **bold**) | json (`structured`) | text |
+|---|---|---|---|
+| `publish_artifact` | **path**, **title**, kind, project, sessionId | `{id, title, kind, project, version, sessionId, link, versionLink, bytes, files}`; an app adds `app:{status}` | A "Published artifact …" sentence, then `link`, `versionLink`, `sessionId`, `bytes`/`files` and (app) `app.status` lines |
+| `update_artifact` | **artifact**, **path**, title, kind, sessionId | the same shape, `version` = the new number; for an app, `app.status` is after the restart of an active app | The same lines under a "Published version … of artifact …" sentence |
+| `list_artifacts` | project, kind | `{artifacts:[record]}`, newest latest version first; each `record` is the `get_artifact` shape, every version included (the same body as REST `GET api/artifacts`) | A header, then one line per artifact showing its latest version only; the header points at `get_artifact` for the rest. `No artifacts.` when empty |
+| `get_artifact` | **artifact** | the stored record plus `link` and a `versionLink` per version; an app record adds `app:{status, version, error, since}` | A lead sentence, `link`, (app) the `app.status` line, then one line per version, oldest first |
+| `delete_artifact` | **artifact**, version | `{deleted:"artifact", id}` or `{deleted:"version", id, version, latest}` | One sentence naming the artifact (and the version and the new latest) |
 
 - `kind` is one of `KINDS` (`src/kinds.js`). The tool set has no process lifecycle: Start, Stop and logs are REST only.
 - `project` matches `^[a-zA-Z0-9._-]+$` (at most 100 characters); `artifact` matches `ID_RE` (`src/links.js`).
@@ -41,7 +45,7 @@ The UI document (`/`) routes on its query string (`parseRoute`, `routeSearch` an
 
 ## Refusal codes
 
-`CODES` in `src/refusal.js` is the single source; REST answers `{error, code}` with the status.
+`CODES` in `src/refusal.js` is the single source; REST answers `{error, code, details?}` with the status, and MCP answers the same body with status 200.
 
 | Code | REST status | Meaning |
 |---|---|---|
@@ -53,7 +57,7 @@ The UI document (`/`) routes on its query string (`parseRoute`, `routeSearch` an
 | `BAD_ARCHIVE` | 422 | Unreadable `.tar.gz` |
 | `TOO_LARGE` | 413 | Over the byte, file-count or markdown-size cap |
 | `KIND_SOURCE_MISMATCH` | 422 | The explicit kind does not fit the source |
-| `KIND_CHANGE` | 409 | An update whose kind differs from the stored kind |
+| `KIND_CHANGE` | 409 | An update whose kind differs from the stored kind; carries `details:{sourceKind, artifactKind}` |
 | `RESERVED_PATH` | 422 | A static source with a root `v/<number>` directory |
 | `APP_MANIFEST_INVALID` | 422 | `artifact.json` is over 16 KiB, not UTF-8 JSON, not an object, has an unknown key, or has a bad `start`, `install` or `prefix` |
 | `NOT_AN_APP` | 409 | `api/apps/:id/…` on an artifact that is not an app |
@@ -66,6 +70,8 @@ The UI document (`/`) routes on its query string (`parseRoute`, `routeSearch` an
 | `CC_UNREACHABLE` | 502 | cc could not answer the project check |
 | `STORE_UNCONFIGURED` | 503 | `CONDUCTOR_PLUGIN_DATA_DIR` is unset, empty or not an absolute path |
 | `UNSUPPORTED_MEDIA_TYPE` | 415 | REST only: a mutating request without a JSON content type |
+| `TOOL_UNKNOWN` | 404 | MCP only: no such tool |
+| `INTERNAL` | 500 | MCP only: an unexpected failure, logged; the message is `internal error` |
 
 ## REST (for the UI)
 

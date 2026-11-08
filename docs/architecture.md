@@ -25,7 +25,8 @@ Node ESM backend (Express 4) plus a React/Vite/Tailwind v4 UI, one package. Cont
 | `src/store.js` | `Store`: on-disk records, versions, mutex, sweep, prune |
 | `src/cc.js` | cc REST reads: project existence, session label |
 | `src/ops.js` | The operations behind both MCP and REST: argument checks, defaults, publish/update/list/get/remove/prune |
-| `src/mcp.js` | Tool handlers keyed by manifest tool name; the envelope handler |
+| `src/mcp.js` | Tool table keyed by manifest tool name; the envelope handler: format, dispatch, refusal shape |
+| `src/mcpText.js` | Text views of the MCP tools: pure `(data, args) → string` |
 | `src/api.js` | REST router for the UI |
 | `src/serve.js` | `a/…`, `raw/…`, `dl/…`, `_page/…` |
 | `src/pages.js` | Markdown page, download landing page (with the inline image preview, `isPreviewImage`) and the static and app wrapper (`staticPage`, `appPage`) templates |
@@ -116,4 +117,4 @@ Node ESM backend (Express 4) plus a React/Vite/Tailwind v4 UI, one package. Cont
 
 App tests start real child processes from a dependency-free fixture app (`tests/fixtures/app-server.cjs`, options in its `fixture.json`) on ephemeral ports. `tests/_apps.mjs` holds the helpers: `startApps` injects short `appTimings` (`TIMINGS`), every wait is `waitFor` against a deadline, and `startApp`'s teardown awaits `server.apps.shutdown()` before the store is removed. `app-reap.test.mjs` also spawns `node server.js` to pin the SIGTERM path (the backend gets `CONDUCTOR_PLUGIN_DATA_DIR` and has `PROJECTS_ROOT` removed); tests that run real app processes tear them down before their store is removed (teardown registered before `tmp()`), and the SIGTERM test reaps by marker (`reapStore`) because a SIGKILLed backend cannot stop its app.
 
-`npm test` runs `tests/run.mjs`, a programmatic `node:test` runner. Each test builds its own temp store and starts the app on port 0 (`startApp` in `tests/_helpers.mjs`); a fake cc (`fakeCc`) stands in for the conductor and `rawTarball` builds hostile archives. Pure UI logic is tested by importing `frontend/src/lib/artifacts.ts` directly. `npm run typecheck` checks the UI.
+`npm test` runs `tests/run.mjs`, a programmatic `node:test` runner. Each test builds its own temp store and starts the app on port 0 (`startApp` in `tests/_helpers.mjs`); a fake cc (`fakeCc`) stands in for the conductor and `rawTarball` builds hostile archives. `tests/_jsonSchemaSubset.mjs` is a test-only port of cc's `checkSchema`/`validate`. `startApp().mcp` sends `format: "json"` by default (`null` omits the key) and `checkReply` in `tests/_mcpContract.mjs` validates every reply, each json one against the tool's manifest `outputSchema`, so a record field added without a schema update fails the suite. Pure UI logic is tested by importing `frontend/src/lib/artifacts.ts` directly. `npm run typecheck` checks the UI.

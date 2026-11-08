@@ -79,7 +79,7 @@ test('SIGTERM to the backend stops its apps and exits 0', async (t) => {
 
   const json = { 'content-type': 'application/json' };
   const call = async (url, body) => (await fetch(base + url, { method: 'POST', headers: json, body: JSON.stringify(body) })).json();
-  const pub = (await call('/api/mcp', { tool: 'publish_artifact', arguments: { path: await appSource(t), title: 'x' }, caller: { project: 'p' } })).result;
+  const pub = (await call('/api/mcp', { tool: 'publish_artifact', arguments: { path: await appSource(t), title: 'x' }, caller: { project: 'p' }, format: 'json' })).structured;
   await call(`/api/apps/${pub.id}/start`, {});
   await waitFor(async () => (await (await fetch(`${base}/api/apps/${pub.id}`)).json()).status === 'running', { what: `the app to run\n${output}` });
   const pid = await recordedPid(storeDir, pub.id);

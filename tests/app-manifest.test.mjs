@@ -47,7 +47,7 @@ test('explicit app without a root artifact.json is KIND_SOURCE_MISMATCH', async 
   const app = await startApp(t);
   const dir = await fixtureDir(t, { 'index.html': 'x' });
   const res = await app.mcp('publish_artifact', { path: dir, title: 'x', kind: 'app' });
-  assert.match(res.data.error, /^KIND_SOURCE_MISMATCH: /);
+  assert.equal(res.data.code, 'KIND_SOURCE_MISMATCH');
 });
 
 test('explicit static on an app dir with index.html still publishes a static site', async (t) => {
@@ -63,7 +63,7 @@ test('a refused manifest leaves no artifact and no staging dir', async (t) => {
   for (const manifest of ['{"start":""}', 'nope', '{"start":"s","typo":1}']) {
     const dir = await appSource(t, { manifest });
     const res = await app.mcp('publish_artifact', { path: dir, title: 'x' });
-    assert.match(res.data.error, /^APP_MANIFEST_INVALID: /, manifest);
+    assert.equal(res.data.code, 'APP_MANIFEST_INVALID', manifest);
   }
   assert.deepEqual((await app.get('/api/artifacts')).data.artifacts, []);
   assert.deepEqual(await fsp.readdir(path.join(app.storeDir, '.staging')), []);

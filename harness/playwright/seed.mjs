@@ -86,11 +86,11 @@ export async function seed() {
   const mcp = async (tool, args, project = 'demo') => {
     const res = await fetch(`${srv.url}/api/mcp`, {
       method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ tool, arguments: args, caller: { sessionId: 'a1b2c3d4-0000', project } }),
+      body: JSON.stringify({ tool, arguments: args, caller: { sessionId: 'a1b2c3d4-0000', project }, format: 'json' }),
     });
     const body = await res.json();
-    if (body.error) throw new Error(`${tool}: ${body.error}`);
-    return body.result;
+    if (body.error) throw new Error(`${tool}: ${body.code}: ${body.error}`);
+    return body.structured;
   };
 
   const md = await mcp('publish_artifact', { path: path.join(files, 'notes.md'), title: 'Release notes' });

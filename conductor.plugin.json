@@ -23,6 +23,87 @@
             "sessionId": { "type": "string", "minLength": 1, "maxLength": 200, "description": "Publishing session; the session named here receives the version's `ccArtifact.report` data. Defaults to the calling session." }
           },
           "required": ["path", "title"]
+        },
+        "outputSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "title",
+            "kind",
+            "project",
+            "version",
+            "sessionId",
+            "link",
+            "versionLink",
+            "bytes",
+            "files"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "enum": [
+                "markdown",
+                "static",
+                "download",
+                "app"
+              ]
+            },
+            "project": {
+              "type": "string"
+            },
+            "version": {
+              "type": "integer",
+              "description": "The version just published."
+            },
+            "sessionId": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "The session that receives this version's reports."
+            },
+            "link": {
+              "type": "string",
+              "description": "Deep link to the artifact's latest version; give it to the user."
+            },
+            "versionLink": {
+              "type": "string",
+              "description": "Deep link pinned to this version."
+            },
+            "bytes": {
+              "type": "integer"
+            },
+            "files": {
+              "type": "integer"
+            },
+            "app": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "App only; after an update, the state after restarting an active app.",
+              "required": [
+                "status"
+              ],
+              "properties": {
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "stopped",
+                    "installing",
+                    "starting",
+                    "running",
+                    "failed"
+                  ]
+                }
+              }
+            }
+          }
         }
       },
       {
@@ -38,16 +119,307 @@
             "sessionId": { "type": "string", "minLength": 1, "maxLength": 200, "description": "Publishing session; the session named here receives the version's `ccArtifact.report` data. Defaults to the calling session." }
           },
           "required": ["artifact", "path"]
+        },
+        "outputSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "title",
+            "kind",
+            "project",
+            "version",
+            "sessionId",
+            "link",
+            "versionLink",
+            "bytes",
+            "files"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "enum": [
+                "markdown",
+                "static",
+                "download",
+                "app"
+              ]
+            },
+            "project": {
+              "type": "string"
+            },
+            "version": {
+              "type": "integer",
+              "description": "The version just published."
+            },
+            "sessionId": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "The session that receives this version's reports."
+            },
+            "link": {
+              "type": "string",
+              "description": "Deep link to the artifact's latest version; give it to the user."
+            },
+            "versionLink": {
+              "type": "string",
+              "description": "Deep link pinned to this version."
+            },
+            "bytes": {
+              "type": "integer"
+            },
+            "files": {
+              "type": "integer"
+            },
+            "app": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "App only; after an update, the state after restarting an active app.",
+              "required": [
+                "status"
+              ],
+              "properties": {
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "stopped",
+                    "installing",
+                    "starting",
+                    "running",
+                    "failed"
+                  ]
+                }
+              }
+            }
+          }
         }
       },
       {
         "name": "list_artifacts",
-        "description": "List artifacts, newest first, optionally for one project or kind.",
+        "description": "List artifacts, newest latest version first, optionally for one project or kind.",
         "inputSchema": {
           "type": "object",
           "properties": {
             "project": { "type": "string", "pattern": "^[a-zA-Z0-9._-]+$", "maxLength": 100 },
             "kind": { "type": "string", "enum": ["markdown", "static", "download", "app"] }
+          }
+        },
+        "outputSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "artifacts"
+          ],
+          "properties": {
+            "artifacts": {
+              "type": "array",
+              "description": "Newest latest version first.",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "schema",
+                  "id",
+                  "kind",
+                  "project",
+                  "title",
+                  "createdAt",
+                  "nextVersion",
+                  "versions",
+                  "link"
+                ],
+                "properties": {
+                  "schema": {
+                    "type": "integer",
+                    "description": "Record format version."
+                  },
+                  "id": {
+                    "type": "string"
+                  },
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "markdown",
+                      "static",
+                      "download",
+                      "app"
+                    ]
+                  },
+                  "project": {
+                    "type": "string"
+                  },
+                  "title": {
+                    "type": "string",
+                    "description": "Current title."
+                  },
+                  "createdAt": {
+                    "type": "string",
+                    "description": "ISO time."
+                  },
+                  "nextVersion": {
+                    "type": "integer",
+                    "description": "Number the next update gets."
+                  },
+                  "versions": {
+                    "type": "array",
+                    "description": "Every version, oldest first; the last is the latest.",
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "n",
+                        "title",
+                        "publishedAt",
+                        "sessionId",
+                        "sessionLabel",
+                        "source",
+                        "bytes",
+                        "files",
+                        "versionLink"
+                      ],
+                      "properties": {
+                        "n": {
+                          "type": "integer",
+                          "description": "Version number; never reused."
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "publishedAt": {
+                          "type": "string",
+                          "description": "ISO time."
+                        },
+                        "sessionId": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "description": "Publishing session; receives this version's ccArtifact.report data."
+                        },
+                        "sessionLabel": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "description": "cc's display label for the session, snapshotted at publish."
+                        },
+                        "source": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "name",
+                            "type"
+                          ],
+                          "properties": {
+                            "name": {
+                              "type": "string"
+                            },
+                            "type": {
+                              "type": "string",
+                              "enum": [
+                                "file",
+                                "dir",
+                                "tar"
+                              ]
+                            }
+                          }
+                        },
+                        "file": {
+                          "type": "string",
+                          "description": "Stored file name (markdown and download only)."
+                        },
+                        "app": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "description": "The version's artifact.json (app only).",
+                          "required": [
+                            "start",
+                            "prefix"
+                          ],
+                          "properties": {
+                            "start": {
+                              "type": "string"
+                            },
+                            "install": {
+                              "type": "string"
+                            },
+                            "prefix": {
+                              "type": "string",
+                              "enum": [
+                                "strip",
+                                "keep"
+                              ]
+                            }
+                          }
+                        },
+                        "bytes": {
+                          "type": "integer"
+                        },
+                        "files": {
+                          "type": "integer"
+                        },
+                        "versionLink": {
+                          "type": "string",
+                          "description": "Deep link pinned to this version."
+                        }
+                      }
+                    }
+                  },
+                  "link": {
+                    "type": "string",
+                    "description": "Deep link to the latest version."
+                  },
+                  "app": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "description": "Live process state (app artifacts only).",
+                    "required": [
+                      "status",
+                      "version",
+                      "error",
+                      "since"
+                    ],
+                    "properties": {
+                      "status": {
+                        "type": "string",
+                        "enum": [
+                          "stopped",
+                          "installing",
+                          "starting",
+                          "running",
+                          "failed"
+                        ]
+                      },
+                      "version": {
+                        "type": [
+                          "integer",
+                          "null"
+                        ],
+                        "description": "Version the process runs; null when stopped."
+                      },
+                      "error": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "since": {
+                        "type": "string",
+                        "description": "ISO time of the last state change."
+                      }
+                    }
+                  }
+                }
+              }
+            }
           }
         }
       },
@@ -58,6 +430,203 @@
           "type": "object",
           "properties": { "artifact": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,47}$", "description": "Artifact id." } },
           "required": ["artifact"]
+        },
+        "outputSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "schema",
+            "id",
+            "kind",
+            "project",
+            "title",
+            "createdAt",
+            "nextVersion",
+            "versions",
+            "link"
+          ],
+          "properties": {
+            "schema": {
+              "type": "integer",
+              "description": "Record format version."
+            },
+            "id": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "enum": [
+                "markdown",
+                "static",
+                "download",
+                "app"
+              ]
+            },
+            "project": {
+              "type": "string"
+            },
+            "title": {
+              "type": "string",
+              "description": "Current title."
+            },
+            "createdAt": {
+              "type": "string",
+              "description": "ISO time."
+            },
+            "nextVersion": {
+              "type": "integer",
+              "description": "Number the next update gets."
+            },
+            "versions": {
+              "type": "array",
+              "description": "Every version, oldest first; the last is the latest.",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "n",
+                  "title",
+                  "publishedAt",
+                  "sessionId",
+                  "sessionLabel",
+                  "source",
+                  "bytes",
+                  "files",
+                  "versionLink"
+                ],
+                "properties": {
+                  "n": {
+                    "type": "integer",
+                    "description": "Version number; never reused."
+                  },
+                  "title": {
+                    "type": "string"
+                  },
+                  "publishedAt": {
+                    "type": "string",
+                    "description": "ISO time."
+                  },
+                  "sessionId": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Publishing session; receives this version's ccArtifact.report data."
+                  },
+                  "sessionLabel": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "cc's display label for the session, snapshotted at publish."
+                  },
+                  "source": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "name",
+                      "type"
+                    ],
+                    "properties": {
+                      "name": {
+                        "type": "string"
+                      },
+                      "type": {
+                        "type": "string",
+                        "enum": [
+                          "file",
+                          "dir",
+                          "tar"
+                        ]
+                      }
+                    }
+                  },
+                  "file": {
+                    "type": "string",
+                    "description": "Stored file name (markdown and download only)."
+                  },
+                  "app": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "description": "The version's artifact.json (app only).",
+                    "required": [
+                      "start",
+                      "prefix"
+                    ],
+                    "properties": {
+                      "start": {
+                        "type": "string"
+                      },
+                      "install": {
+                        "type": "string"
+                      },
+                      "prefix": {
+                        "type": "string",
+                        "enum": [
+                          "strip",
+                          "keep"
+                        ]
+                      }
+                    }
+                  },
+                  "bytes": {
+                    "type": "integer"
+                  },
+                  "files": {
+                    "type": "integer"
+                  },
+                  "versionLink": {
+                    "type": "string",
+                    "description": "Deep link pinned to this version."
+                  }
+                }
+              }
+            },
+            "link": {
+              "type": "string",
+              "description": "Deep link to the latest version."
+            },
+            "app": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "Live process state (app artifacts only).",
+              "required": [
+                "status",
+                "version",
+                "error",
+                "since"
+              ],
+              "properties": {
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "stopped",
+                    "installing",
+                    "starting",
+                    "running",
+                    "failed"
+                  ]
+                },
+                "version": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "description": "Version the process runs; null when stopped."
+                },
+                "error": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "since": {
+                  "type": "string",
+                  "description": "ISO time of the last state change."
+                }
+              }
+            }
+          }
         }
       },
       {
@@ -70,6 +639,54 @@
             "version": { "type": "integer", "minimum": 1, "description": "Delete only this version." }
           },
           "required": ["artifact"]
+        },
+        "outputSchema": {
+          "type": "object",
+          "additionalProperties": true,
+          "anyOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "deleted",
+                "id"
+              ],
+              "properties": {
+                "deleted": {
+                  "const": "artifact"
+                },
+                "id": {
+                  "type": "string"
+                }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "deleted",
+                "id",
+                "version",
+                "latest"
+              ],
+              "properties": {
+                "deleted": {
+                  "const": "version"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "version": {
+                  "type": "integer",
+                  "description": "The version removed."
+                },
+                "latest": {
+                  "type": "integer",
+                  "description": "The artifact's latest version after the delete."
+                }
+              }
+            }
+          ]
         }
       }
     ]

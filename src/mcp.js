@@ -1,42 +1,40 @@
-import { Refusal } from './refusal.js';
+import { Refusal, refusalBody } from './refusal.js';
+import { views } from './mcpText.js';
 
-/** `{summary}` shape of list_artifacts: one row per artifact, latest version only. */
-const summarize = (r) => {
-  const v = r.versions[r.versions.length - 1];
-  return {
-    id: r.id, title: r.title, kind: r.kind, project: r.project, versions: r.versions.length,
-    latest: { version: v.n, publishedAt: v.publishedAt, sessionId: v.sessionId, sessionLabel: v.sessionLabel },
-    link: r.link,
-    ...(r.app ? { app: r.app } : {}),
-  };
-};
+const FORMATS = ['text', 'json'];
 
-/** The MCP tool handlers, keyed by the manifest's tool names. */
+/**
+ * The MCP tools, keyed by the manifest's tool names: `run(args, caller)` returns the complete data (the json reply),
+ * `text(data, args)` renders it as prose for agents.
+ */
 export function createTools(ops) {
   return {
-    publish_artifact: (args, caller) => ops.publish(args, caller),
-    update_artifact: (args, caller) => ops.update(args, caller),
-    list_artifacts: async (args) => ({ artifacts: (await ops.list(args)).artifacts.map(summarize) }),
-    get_artifact: (args) => ops.get(args),
-    delete_artifact: (args) => ops.remove(args),
+    publish_artifact: { run: (args, caller) => ops.publish(args, caller), text: views.publish },
+    update_artifact: { run: (args, caller) => ops.update(args, caller), text: views.update },
+    list_artifacts: { run: (args) => ops.list(args), text: views.list },
+    get_artifact: { run: (args) => ops.get(args), text: views.get },
+    delete_artifact: { run: (args) => ops.remove(args), text: views.remove },
   };
 }
 
 /**
- * Handles one MCP envelope `{tool, arguments, caller}`. Every well-formed call answers 200:
- * `{result}`, or `{error: "<CODE>: <message>"}` (MCP errors are plain strings, so the code is the prefix).
+ * Handles one MCP envelope `{tool, arguments, caller, format}`. `format` is "json" or "text" (absent means text: a cc that
+ * predates typed tools never sends it). A well-formed call answers 200: `{structured}` (json), `{text}` (text), or a
+ * refusal `{error, code, details?}` in either format. A malformed envelope or an unknown format is 400.
  */
 export async function handle(tools, envelope) {
   if (!envelope || typeof envelope !== 'object' || typeof envelope.tool !== 'string') {
-    return { status: 400, body: { error: 'malformed envelope: expected {tool, arguments, caller}' } };
+    return { status: 400, body: { error: 'malformed envelope: expected {tool, arguments, caller, format}' } };
   }
-  const { tool, arguments: args = {}, caller = {} } = envelope;
-  if (!Object.hasOwn(tools, tool)) return { status: 200, body: { error: `unknown tool ${tool}` } };
+  const { tool, arguments: args = {}, caller = {}, format = 'text' } = envelope;
+  if (!FORMATS.includes(format)) return { status: 400, body: { error: 'format must be "text" or "json"' } };
+  if (!Object.hasOwn(tools, tool)) return { status: 200, body: refusalBody(new Refusal('TOOL_UNKNOWN', `unknown tool ${tool}`)) };
   try {
-    return { status: 200, body: { result: await tools[tool](args, caller ?? {}) } };
+    const data = await tools[tool].run(args, caller ?? {});
+    return { status: 200, body: format === 'json' ? { structured: data } : { text: tools[tool].text(data, args) } };
   } catch (e) {
-    if (e instanceof Refusal) return { status: 200, body: { error: `${e.code}: ${e.message}` } };
+    if (e instanceof Refusal) return { status: 200, body: refusalBody(e) };
     console.error(`code-artifact: ${tool} failed:`, e);
-    return { status: 200, body: { error: 'internal error' } };
+    return { status: 200, body: refusalBody(new Refusal('INTERNAL', 'internal error')) };
   }
 }

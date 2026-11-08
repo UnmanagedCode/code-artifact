@@ -21,17 +21,20 @@ export const CODES = {
   CC_UNREACHABLE: 502,
   STORE_UNCONFIGURED: 503,
   UNSUPPORTED_MEDIA_TYPE: 415,
+  TOOL_UNKNOWN: 404,
+  INTERNAL: 500,
 };
 
 export class Refusal extends Error {
-  constructor(code, message) {
+  constructor(code, message, details) {
     super(message);
     if (!(code in CODES)) throw new Error(`unknown refusal code ${code}`);
     this.name = 'Refusal';
     this.code = code;
     this.status = CODES[code];
+    if (details) this.details = details;
   }
 }
 
-/** The REST body for a refusal. */
-export const refusalBody = (r) => ({ error: r.message, code: r.code });
+/** The body for a refusal on REST and MCP: `{error, code, details?}`. */
+export const refusalBody = (r) => ({ error: r.message, code: r.code, ...(r.details ? { details: r.details } : {}) });
