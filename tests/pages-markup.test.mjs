@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { staticPage, appPage } from '../src/pages.js';
+import { staticPage, appPage, markdownPage, downloadPage } from '../src/pages.js';
 
 const DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'pages');
 const prefix = '../../';
@@ -28,5 +28,38 @@ test('static and app wrapper markup is byte-identical to the captured fixtures',
     const file = path.join(DIR, `${name}.html`);
     if (process.env.UPDATE_FIXTURES) await fsp.writeFile(file, render());
     assert.equal(render(), await fsp.readFile(file, 'utf8'), name);
+  }
+});
+
+const barOf = (html) => /<header class="bar">[\s\S]*?<\/header>/.exec(html)?.[0];
+const mdProps = { prefix, id: 'abc', project, version, rendered: '<p>x</p>' };
+
+test('markdown and static pages render the same header bar', () => {
+  for (const latest of [true, false]) {
+    const md = barOf(markdownPage({ ...mdProps, latest }));
+    assert.ok(md, 'the markdown page has a bar');
+    assert.equal(md, barOf(staticPage({ ...base, latest })));
+  }
+});
+
+test("the download page's bar has the back link, title and badge, and no Download link", () => {
+  const html = downloadPage({ ...mdProps, version: { ...version, title: 'Bin' }, latest: true });
+  const bar = barOf(html);
+  assert.match(bar, /Artifacts<\/a>/);
+  assert.match(bar, /<h1>Bin<\/h1>/);
+  assert.match(bar, /v2 · latest/);
+  assert.doesNotMatch(bar, /Download/);
+  assert.match(html.slice(bar.length + html.indexOf(bar)), /<a class="btn primary" href="\.\.\/\.\.\/dl\/abc\/2">Download<\/a>/);
+});
+
+test('latest markdown and download pages put the update notice right after the bar, before the content; pinned ones have neither', () => {
+  for (const render of [markdownPage, downloadPage]) {
+    const latest = render({ ...mdProps, latest: true });
+    const top = /<div class="page-top">([\s\S]*?)<\/div>\n<main/.exec(latest);
+    assert.ok(top, 'the bar and notice share one top container before <main>');
+    assert.ok(top[1].trimStart().startsWith(barOf(latest)), 'the bar leads the container');
+    assert.match(top[1].trimStart().slice(barOf(latest).length), /^\s*<div class="update-notice"[^>]* role="status"><\/div>\s*$/);
+    const pinned = render({ ...mdProps, latest: false });
+    assert.doesNotMatch(pinned, /role="status"|update-check\.js/);
   }
 });

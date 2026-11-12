@@ -99,8 +99,8 @@ const OWN_FILES = async () => [
   'assets/page.css', 'src/pages.js',
 ];
 
-test('every var(--x) the plugin uses is a pinned token, --cc-session-width, or a Tailwind --tw-* variable', async () => {
-  const allowed = new Set([...Object.keys(LIGHT), '--cc-session-width']);
+test('every var(--x) the plugin uses is a pinned token, --cc-session-width, --top-row-h (the page layout\'s row height), or a Tailwind --tw-* variable', async () => {
+  const allowed = new Set([...Object.keys(LIGHT), '--cc-session-width', '--top-row-h']);
   const themeVars = new Set([...(await read('frontend/src/index.css')).matchAll(/^\s*(--(?:font|radius)-[\w-]+):/gm)].map((m) => m[1]));
   for (const file of await OWN_FILES()) {
     for (const m of (await read(file)).matchAll(/var\((--[\w-]+)/g)) {

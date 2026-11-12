@@ -31,14 +31,12 @@ const updateAttrs = (prefix, id, n) => ` data-update-api="${escapeHtml(`${prefix
 const UPDATE_NOTICE = '<div class="update-notice" data-role="update" role="status"></div>';
 const updateScript = (prefix) => `<script src="${prefix}_page/update-check.js" defer></script>\n`;
 
-function shell({ prefix, project, title, header, body, update = null }) {
+function shell({ prefix, project, title, items, body, update = null }) {
   return `${head(prefix, title)}<body${update ? updateAttrs(prefix, update.id, update.n) : ''}>
+<div class="page-top">
+${bar(prefix, project, title, items)}
+${update ? `${UPDATE_NOTICE}\n` : ''}</div>
 <main class="page">
-<header class="page-head">
-<p class="back">${backLink(prefix, project)}</p>
-<h1>${escapeHtml(title)}</h1>
-${header}
-${update ? `${UPDATE_NOTICE}\n` : ''}</header>
 ${body}
 </main>
 ${update ? updateScript(prefix) : ''}</body>
@@ -51,16 +49,22 @@ const stamp = (iso) => `<time datetime="${escapeHtml(iso)}">${escapeHtml(iso.sli
 const backLink = (prefix, project) =>
   `<a class="btn ghost" href="${escapeHtml(`${prefix}?${new URLSearchParams({ project })}`)}"><span aria-hidden="true">←</span> Artifacts</a>`;
 const downloadLink = (prefix, id, n) => `${prefix}dl/${id}/${n}`;
+const badge = (version, latest) => `<span class="badge">v${version.n} · ${latest ? 'latest' : 'pinned'}</span>`;
+/** The compact header bar of every artifact page; `items` is the markup after the title. */
+const bar = (prefix, project, title, items) => `<header class="bar">
+${backLink(prefix, project)}
+<h1>${escapeHtml(title)}</h1>
+${items.join('\n')}
+</header>`;
 
 // By the stored file's extension: dl/ derives its Content-Type from the same name.
 const PREVIEW_IMAGE = /\.(png|jpe?g|gif|webp|svg)$/i;
 export const isPreviewImage = (name) => PREVIEW_IMAGE.test(name);
 
-/** The page for a markdown version: header plus the sanitized, pre-rendered body. */
+/** The page for a markdown version: the header bar plus the sanitized, pre-rendered body. */
 export function markdownPage({ prefix, id, project, version, latest, rendered }) {
-  const header = `<p class="meta"><span class="badge">v${version.n} · ${latest ? 'latest' : 'pinned'}</span>
-<a class="btn" href="${downloadLink(prefix, id, version.n)}">Download</a></p>`;
-  return shell({ prefix, project, title: version.title, header, body: `<article class="md">${rendered}</article>`, update: latest ? { id, n: version.n } : null });
+  const items = [badge(version, latest), `<a class="btn" href="${downloadLink(prefix, id, version.n)}">Download</a>`];
+  return shell({ prefix, project, title: version.title, items, body: `<article class="md">${rendered}</article>`, update: latest ? { id, n: version.n } : null });
 }
 
 /**
@@ -68,7 +72,6 @@ export function markdownPage({ prefix, id, project, version, latest, rendered })
  * An image version also previews inline, as an <img> of that same URL, so an SVG never runs script.
  */
 export function downloadPage({ prefix, id, project, version, latest }) {
-  const header = `<p class="meta"><span class="badge">v${version.n} · ${latest ? 'latest' : 'pinned'}</span></p>`;
   const preview = isPreviewImage(version.file)
     ? `<p class="preview"><img src="${downloadLink(prefix, id, version.n)}" alt="${escapeHtml(version.title)}"></p>\n`
     : '';
@@ -77,7 +80,7 @@ ${preview}<p class="file">${escapeHtml(version.file)}</p>
 <p class="meta">${formatBytes(version.bytes)} · published ${stamp(version.publishedAt)}</p>
 <p><a class="btn primary" href="${downloadLink(prefix, id, version.n)}">Download</a></p>
 </section>`;
-  return shell({ prefix, project, title: version.title, header, body, update: latest ? { id, n: version.n } : null });
+  return shell({ prefix, project, title: version.title, items: [badge(version, latest)], body, update: latest ? { id, n: version.n } : null });
 }
 
 /** What `_page/relay.js` reads: the viewed version and the session that published it (empty when none was recorded). */
@@ -91,12 +94,7 @@ const relayScript = (prefix) => `<script src="${prefix}_page/relay.js"></script>
 export function staticPage({ prefix, id, project, version, latest, frameSrc }) {
   return `${head(prefix, version.title)}<body class="wrap"${reportAttrs(version, id)}${latest ? updateAttrs(prefix, id, version.n) : ''}>
 ${relayScript(prefix)}
-<header class="bar">
-${backLink(prefix, project)}
-<h1>${escapeHtml(version.title)}</h1>
-<span class="badge">v${version.n} · ${latest ? 'latest' : 'pinned'}</span>
-<a class="btn" href="${downloadLink(prefix, id, version.n)}">Download</a>
-</header>
+${bar(prefix, project, version.title, [badge(version, latest), `<a class="btn" href="${downloadLink(prefix, id, version.n)}">Download</a>`])}
 ${latest ? `${UPDATE_NOTICE}\n` : ''}<iframe class="site" title="${escapeHtml(version.title)}" src="${escapeHtml(frameSrc)}"></iframe>
 ${latest ? updateScript(prefix) : ''}</body>
 </html>
@@ -119,17 +117,12 @@ const STATE_TEXT = {
 export function appPage({ prefix, id, project, version, latest, latestN, state, frameSrc }) {
   const runs = version.n === latestN;
   const title = escapeHtml(version.title);
-  const badge = `<span class="badge">v${version.n} · ${latest ? 'latest' : 'pinned'}</span>`;
+  const versionBadge = badge(version, latest);
   const links = `<a class="btn" href="${prefix}?artifact=${id}">Logs</a>
 <a class="btn" href="${downloadLink(prefix, id, version.n)}">Download</a>`;
   if (!runs) {
     return `${head(prefix, version.title)}<body class="wrap app">
-<header class="bar">
-${backLink(prefix, project)}
-<h1>${title}</h1>
-${badge}
-${links}
-</header>
+${bar(prefix, project, version.title, [versionBadge, links])}
 <div class="stage">
 <section class="app-panel">
 <p class="app-state">v${version.n} does not run; only the latest (v${latestN}) runs.</p>
@@ -152,14 +145,7 @@ ${links}
 </section>`;
   return `${head(prefix, version.title)}<body class="wrap app" data-api="${prefix}api/apps/${id}" data-frame-src="${escapeHtml(frameSrc)}" data-title="${title}" data-status="${state.status}"${reportAttrs(version, id)}${latest ? updateAttrs(prefix, id, version.n) : ''}>
 ${relayScript(prefix)}
-<header class="bar">
-${backLink(prefix, project)}
-<h1>${title}</h1>
-${badge}
-<span class="badge status" data-role="status" data-tone="${state.status}">${state.status}</span>
-<button type="button" class="btn" data-role="toggle">${active ? 'Stop' : 'Start'}</button>
-${links}
-</header>
+${bar(prefix, project, version.title, [versionBadge, `<span class="badge status" data-role="status" data-tone="${state.status}">${state.status}</span>`, `<button type="button" class="btn" data-role="toggle">${active ? 'Stop' : 'Start'}</button>`, links])}
 ${latest ? `${UPDATE_NOTICE}\n` : ''}<p class="bar-error" data-role="action-error" role="alert" hidden></p>
 <div class="stage" data-role="stage">
 ${stage}
