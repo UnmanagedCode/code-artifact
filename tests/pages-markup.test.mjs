@@ -20,6 +20,9 @@ const CASES = {
   'app-running-latest': () => appPage({ ...app, state: { status: 'running' } }),
   'app-stopped-error': () => appPage({ ...app, state: { status: 'stopped', error: 'boom <b>&"' } }),
   'app-installing': () => appPage({ ...app, state: { status: 'installing' } }),
+  'app-starting': () => appPage({ ...app, state: { status: 'starting' } }),
+  'app-failed': () => appPage({ ...app, state: { status: 'failed', error: 'exited with code 4' } }),
+  'app-running-not-latest': () => appPage({ ...app, latest: false, state: { status: 'running' } }),
   'app-pinned-not-running': () => appPage({ ...app, latest: false, latestN: 3, state: { status: 'stopped' } }),
 };
 
