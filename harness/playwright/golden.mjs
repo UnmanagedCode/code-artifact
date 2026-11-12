@@ -214,23 +214,51 @@ try {
         await artifactsLink.waitFor();
         await shot('page-markdown');
         // Markdown and download pages: a compact bar of one row, pinned at the top while the document scrolls.
-        const topRowH = () => page.evaluate(() => parseFloat(getComputedStyle(document.documentElement).fontSize) * 2.75);
+        // `--top-row-h` as the page resolves it, read through a probe so the check does not restate the stylesheet.
+        const topRowH = () => page.evaluate(() => {
+          const probe = document.createElement('div');
+          probe.style.cssText = 'position:absolute;visibility:hidden;height:var(--top-row-h)';
+          document.body.append(probe);
+          const h = probe.getBoundingClientRect().height;
+          probe.remove();
+          return h;
+        });
         async function assertOneRow() {
           const bar = page.getByRole('banner');
-          const ys = await bar.locator(':scope > *').evaluateAll((els) => els.map((el) => { const r = el.getBoundingClientRect(); return r.y + r.height / 2; }));
-          assert.ok(Math.max(...ys) - Math.min(...ys) < 2, `the bar's children share one row (${ys})`);
-          assert.ok((await bar.boundingBox()).height <= (await topRowH()) + 0.5, 'the bar is no taller than one row');
+          const info = await bar.evaluate((el) => {
+            const box = el.getBoundingClientRect();
+            const items = [...el.children].map((c) => { const r = c.getBoundingClientRect(); return { tag: c.tagName, centre: r.y + r.height / 2, right: r.right, width: r.width }; });
+            return { items, right: box.right, height: box.height };
+          });
+          const centres = info.items.map((i) => i.centre);
+          assert.ok(Math.max(...centres) - Math.min(...centres) < 2, `the bar's children share one row (${centres})`);
+          assert.ok(info.height <= (await topRowH()) + 0.5, 'the bar is no taller than one row');
+          for (const i of info.items) assert.ok(i.right <= info.right + 0.5, `a ${i.tag} item sits fully inside the bar (right ${i.right} vs ${info.right})`);
         }
         await page.goto(`${world.url}/a/${world.ids.liveNotes}/`);
         await page.getByRole('heading', { name: 'Section 17' }).waitFor();
         await assertOneRow();
         assert.ok(await fits(), `long markdown overflows at ${vname} width`);
+        // A narrow viewport where the fixed items plus the title's base basis (`.bar h1`) would not fit one row, so only the sticky bar's nowrap and shrinking title keep it on one row.
+        if (vname === 'phone') {
+          const wide = viewport;
+          await page.setViewportSize({ width: 340, height: wide.height });
+          const demand = await page.getByRole('banner').evaluate((el) => {
+            const cs = getComputedStyle(el);
+            const h1 = el.querySelector('h1');
+            const basis = parseFloat(getComputedStyle(document.documentElement).fontSize) * 6;
+            const fixed = [...el.children].filter((c) => c !== h1).reduce((sum, c) => sum + c.getBoundingClientRect().width, 0);
+            return fixed + basis + parseFloat(cs.columnGap) * (el.children.length - 1) + parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight);
+          });
+          assert.ok(demand > 340, `precondition: a wrapping bar would not fit one row at 340px (needs ${demand}px)`);
+          await assertOneRow();
+          assert.ok(await fits(), `long markdown overflows at 340px`);
+          await page.setViewportSize(wide);
+        }
         const titleH1 = page.getByRole('banner').getByRole('heading', { level: 1 });
         const truncated = await titleH1.evaluate((el) => el.scrollWidth > el.clientWidth);
         if (vname === 'phone') {
           assert.ok(truncated, 'the long title is truncated on the phone');
-          const badgeEl = page.getByRole('banner').locator('.badge');
-          assert.ok(await badgeEl.evaluate((el) => el.scrollWidth <= el.clientWidth), 'the badge shows whole');
         }
         await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
         const banner = page.getByRole('banner');

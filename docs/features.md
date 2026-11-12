@@ -111,7 +111,7 @@ A latest view (`a/<id>/`, any kind) checks for a new version every `POLL_MS` (`a
 | The plugin unreachable or any other failure | Unchanged | Retries on the next check |
 
 - **View update** reloads the page, which shows whatever is latest at that moment.
-- On a scrolled markdown or download page, the notice appearing shifts the content down one row, once, in every browser (scroll anchoring does not hold it).
+- On a scrolled markdown or download page, the notice appearing shifts the content down one row, once; scroll anchoring does not hold the position (checked in Chromium by the harness).
 - A pinned view (`a/<id>/v/<n>/`) never checks and has no notice.
 - The UI's detail view is unchanged.
 - An app that runs is already restarted on the new version by `update_artifact`, so the app inside the frame serves the new code whatever the notice says; **View update** refreshes the header, version badge, Download link and report target.
