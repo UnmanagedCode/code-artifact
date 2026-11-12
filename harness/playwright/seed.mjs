@@ -35,6 +35,12 @@ console.log('hello');
 \`\`\`
 `;
 
+// Long enough to scroll on every viewport; `## Section <i>` headings give the scroll checks something to jump to.
+const LONG_MARKDOWN = Array.from({ length: 30 }, (_, i) => `## Section ${i + 1}
+
+Paragraph ${i + 1} of the long document, with a [link](https://example.com/${i + 1}) and enough text to wrap onto a second line on a narrow screen.
+`).join('\n');
+
 // Visible shapes, a script that marks the top document if it ever runs, and an external fetch that must never happen.
 const EVIL_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 120">
 <rect width="200" height="120" rx="12" fill="#2f6fde"/><circle cx="60" cy="60" r="36" fill="#f5c542"/><path d="M110 90 150 30 190 90z" fill="#e8eef9"/>
@@ -104,7 +110,8 @@ export async function seed() {
   const svg = await mcp('publish_artifact', { path: path.join(files, 'evil.svg'), title: 'Hostile SVG' });
 
   // Two artifacts the update-notice steps bump: `bump(key)` publishes a fresh version and returns its number.
-  const liveNotes = await mcp('publish_artifact', { path: path.join(files, 'notes.md'), title: 'Live notes' });
+  fs.writeFileSync(path.join(files, 'live-notes.md'), `# Live notes\n\n${LONG_MARKDOWN}`);
+  const liveNotes = await mcp('publish_artifact', { path: path.join(files, 'live-notes.md'), title: 'Live notes for the quarterly platform migration and every downstream consumer' });
   fs.mkdirSync(path.join(files, 'live-site'));
   fs.writeFileSync(path.join(files, 'live-site', 'index.html'), '<!doctype html><title>Live</title><h1>Live site</h1>');
   const liveSite = await mcp('publish_artifact', { path: path.join(files, 'live-site'), title: 'Live site' });
@@ -113,7 +120,7 @@ export async function seed() {
   const bump = async (key) => {
     const n = ++bumps;
     const source = key === 'liveNotes' ? path.join(files, `bump-${n}.md`) : path.join(files, `bump-${n}`);
-    if (key === 'liveNotes') fs.writeFileSync(source, `${MARKDOWN}\nBump ${n}.\n`);
+    if (key === 'liveNotes') fs.writeFileSync(source, `# Live notes\n\n${LONG_MARKDOWN}\nBump ${n}.\n`);
     else { fs.mkdirSync(source); fs.writeFileSync(path.join(source, 'index.html'), `<!doctype html><title>Live</title><h1>Live site</h1><p>Bump ${n}</p>`); }
     return (await mcp('update_artifact', { artifact: live[key].id, path: source })).version;
   };

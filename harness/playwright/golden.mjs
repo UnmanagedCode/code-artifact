@@ -50,7 +50,7 @@ try {
         await page.emulateMedia({ colorScheme: scheme });
         const shot = async (step) => {
           const file = path.join(outDir, `${step}-${vname}-${scheme}.png`);
-          await page.screenshot({ path: file, animations: 'disabled', fullPage: step.startsWith('page-') && !step.startsWith('page-static') });
+          await page.screenshot({ path: file, animations: 'disabled', fullPage: step.startsWith('page-') && !step.startsWith('page-static') && !step.endsWith('-scrolled') });
           shots.push(file);
         };
 
@@ -213,10 +213,49 @@ try {
         assert.equal(await page.locator('article.md input[type=checkbox]').count(), 2);
         await artifactsLink.waitFor();
         await shot('page-markdown');
+        // Markdown and download pages: a compact bar of one row, pinned at the top while the document scrolls.
+        const topRowH = () => page.evaluate(() => parseFloat(getComputedStyle(document.documentElement).fontSize) * 2.75);
+        async function assertOneRow() {
+          const bar = page.getByRole('banner');
+          const ys = await bar.locator(':scope > *').evaluateAll((els) => els.map((el) => { const r = el.getBoundingClientRect(); return r.y + r.height / 2; }));
+          assert.ok(Math.max(...ys) - Math.min(...ys) < 2, `the bar's children share one row (${ys})`);
+          assert.ok((await bar.boundingBox()).height <= (await topRowH()) + 0.5, 'the bar is no taller than one row');
+        }
+        await page.goto(`${world.url}/a/${world.ids.liveNotes}/`);
+        await page.getByRole('heading', { name: 'Section 17' }).waitFor();
+        await assertOneRow();
+        assert.ok(await fits(), `long markdown overflows at ${vname} width`);
+        const titleH1 = page.getByRole('banner').getByRole('heading', { level: 1 });
+        const truncated = await titleH1.evaluate((el) => el.scrollWidth > el.clientWidth);
+        if (vname === 'phone') {
+          assert.ok(truncated, 'the long title is truncated on the phone');
+          const badgeEl = page.getByRole('banner').locator('.badge');
+          assert.ok(await badgeEl.evaluate((el) => el.scrollWidth <= el.clientWidth), 'the badge shows whole');
+        }
+        await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+        const banner = page.getByRole('banner');
+        assert.ok(Math.abs((await banner.boundingBox()).y) < 1, 'the bar stays at the top of the viewport when scrolled');
+        assert.ok(await artifactsLink.isVisible(), '← Artifacts stays visible when scrolled');
+        await shot('page-markdown-scrolled');
+        const clearsHeader = async (label) => {
+          await page.getByRole('heading', { name: 'Section 17' }).evaluate((el) => el.scrollIntoView());
+          const headingTop = (await page.getByRole('heading', { name: 'Section 17' }).boundingBox()).y;
+          const headerBottom = await page.evaluate(() => document.querySelector('.page-top').getBoundingClientRect().bottom);
+          assert.ok(headingTop >= headerBottom - 0.5, `${label}: scrollIntoView lands below the header (${headingTop} vs ${headerBottom})`);
+        };
+        await clearsHeader('bar only');
+        await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+        await artifactsLink.click();
+        await page.getByRole('button', { name: 'Show all' }).waitFor();
+        assert.equal(await page.locator('main').getByText('Project: demo').count(), 1, 'the list is filtered to demo');
+        await page.goBack();
+        await page.getByRole('heading', { name: 'Section 17' }).waitFor();
         await page.goto(`${world.url}/a/${world.ids.download}/`);
         await page.getByRole('link', { name: 'Download' }).waitFor();
         await artifactsLink.waitFor();
         await shot('page-download');
+        await assertOneRow();
+        assert.ok(await fits(), `page-download overflows at ${vname} width`);
         // Image downloads preview inline; the SVG's script never runs and its external image is never fetched.
         for (const [step, id] of [['page-download-png', world.ids.image], ['page-download-svg', world.ids.svg]]) {
           await page.goto(`${world.url}/a/${id}/`);
@@ -328,10 +367,24 @@ try {
           assert.ok(box.width <= 1 && box.height <= 1, `${step}: the empty region is visually hidden`);
           const style = await status.evaluate((el) => { const c = getComputedStyle(el); return [c.position, c.paddingTop, c.paddingBottom, c.borderTopWidth, c.borderBottomWidth]; });
           assert.deepEqual(style, ['absolute', '0px', '0px', '0px', '0px'], `${step}: the empty region takes no layout space`);
+          const scrolled = key === 'liveNotes';
+          const probe = page.getByRole('heading', { name: 'Section 20' });
+          let probeY = 0;
+          if (scrolled) {
+            await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+            probeY = (await probe.boundingBox()).y;
+          }
           const first = await world.bump(key);
           await check();
           const viewUpdate = page.getByRole('button', { name: 'View update' });
           await viewUpdate.waitFor();
+          if (scrolled) {
+            const bar = await page.getByRole('banner').boundingBox();
+            const button = await viewUpdate.boundingBox();
+            assert.ok(button.y >= bar.y + bar.height - 1 && button.y + button.height <= viewport.height, 'View update sits in the viewport under the bar');
+            { const dy = (await probe.boundingBox()).y - probeY; const row = await topRowH(); assert.ok(Math.abs(dy - row) <= 2, `the content shifts down one row when the notice appears (moved ${dy}px, row ${row}px)`); }
+            await clearsHeader('bar and notice');
+          }
           assert.match(await status.textContent(), new RegExp(`v${first}\\b`));
           await shot(step);
           assert.ok(await fits(), `${step} overflows at ${vname} width`);
