@@ -4,7 +4,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { publish, fixtureFile, fixtureDir } from './_helpers.mjs';
 import { startApps, appSource } from './_apps.mjs';
-import { markdownPage, staticPage } from '../src/pages.js';
+import { markdownPage, staticPage, downloadPage } from '../src/pages.js';
 import { parseRoute } from '../frontend/src/lib/artifacts.ts';
 
 const unescape = (s) => s.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, '&');
@@ -56,6 +56,7 @@ test('an untrusted project name cannot add a param or break the attribute', () =
   const htmls = [
     markdownPage({ prefix: '../../', id: 'i', project, version, latest: true, rendered: '' }),
     staticPage({ prefix: '../../', id: 'i', project, version, latest: true, frameSrc: 'f' }),
+    downloadPage({ prefix: '../../', id: 'i', project, version, latest: true }),
   ];
   for (const html of htmls) {
     assert.deepEqual(parseRoute(new URL(backHref(html), BASE).search), { view: 'list', project });
