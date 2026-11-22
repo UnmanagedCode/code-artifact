@@ -90,7 +90,7 @@ test('the built UI uses only relative asset URLs', async () => {
   const html = await fsp.readFile(new URL('../frontend/dist/index.html', import.meta.url), 'utf8').catch(() => null);
   if (html === null) return; // the real build is exercised by `npm run prepare`
   const rootRelative = [...html.matchAll(/(?:src|href)="(\/[^"]*)"/g)].map((m) => m[1]);
-  assert.deepEqual(rootRelative.sort(), ['/pluginBridge.js', '/pluginTheme.css']);
+  assert.deepEqual(rootRelative, []);
 });
 
 test('the UI route does not shadow content or API routes', async (t) => {

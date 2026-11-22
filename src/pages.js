@@ -9,13 +9,14 @@ export function formatBytes(n) {
   return `${v.toFixed(v < 10 ? 1 : 0)} ${units[i]}`;
 }
 
-// `prefix` is the relative path from the page back to the plugin root ("../../" under a/<id>/).
+// `prefix` is the relative path from the page back to the plugin root ("../../" under a/<id>/). cc mounts the plugin at
+// plugins/<id>/, so cc's host files sit two levels above that root: `${prefix}../../` reaches them at any depth.
 const head = (prefix, title) => `<!doctype html>
 <html lang="en" data-reload-on-search>
 <head>
 <meta charset="utf-8">
-<script src="/pluginBridge.js"></script>
-<link rel="stylesheet" href="/pluginTheme.css">
+<script src="${prefix}../../pluginBridge.js"></script>
+<link rel="stylesheet" href="${prefix}../../pluginTheme.css">
 <link rel="stylesheet" href="${prefix}_page/fallback.css">
 <link rel="stylesheet" href="${prefix}_page/page.css">
 <script src="${prefix}_page/theme-init.js"></script>
