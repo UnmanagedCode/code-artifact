@@ -113,7 +113,8 @@ test('the static wrapper is a plugin page at latest, pinned and subpath URLs: br
     assert.equal(res.status, 200, url);
     assert.match(res.headers.get('content-type'), /text\/html/);
     const head = res.text.slice(res.text.indexOf('<head>'));
-    assert.ok(head.indexOf('/pluginBridge.js') < head.indexOf('/pluginTheme.css'), url);
+    const up = '../'.repeat(url.split('/').length); // from the page back to cc's root: the plugin root is two levels below it
+    assert.ok(head.indexOf(`src="${up}pluginBridge.js"`) < head.indexOf(`href="${up}pluginTheme.css"`), url);
     assert.match(head, /_page\/nav\.js"/, url);
     assert.match(head, /_page\/theme-init\.js"/, url);
     const csp = res.headers.get('content-security-policy');
@@ -144,6 +145,17 @@ test('the wrapper src resolves, from the wrapper URL, to the raw route that serv
     const target = new URL(frameSrc((await app.get(url)).text), wrapper);
     assert.match(target.pathname, new RegExp(`^/raw/${art.id}/1/`));
     assert.equal((await app.get(target.pathname)).status, 200, url);
+  }
+});
+
+test('the host bridge and theme resolve to cc\'s root from every wrapper depth, so they follow a URL prefix on the mount', async (t) => {
+  const { app, art } = await staticApp(t);
+  const mounted = 'http://cc.internal/p/q/plugins/code-artifact';
+  for (const url of [`/a/${art.id}/`, `/a/${art.id}/v/1/`, `/a/${art.id}/docs/guide.txt`]) {
+    const html = (await app.get(url)).text;
+    const page = new URL(`${mounted}${url}`);
+    assert.equal(new URL(/src="([^"]*pluginBridge\.js)"/.exec(html)[1], page).href, 'http://cc.internal/p/q/pluginBridge.js', url);
+    assert.equal(new URL(/href="([^"]*pluginTheme\.css)"/.exec(html)[1], page).href, 'http://cc.internal/p/q/pluginTheme.css', url);
   }
 });
 
@@ -180,7 +192,8 @@ test('markdown: the page has the bridge first, the theme, relative assets, sanit
   assert.match(page.headers.get('content-type'), /text\/html/);
   const head = page.text.slice(page.text.indexOf('<head>'));
   assert.ok(head.indexOf('/pluginBridge.js') < head.indexOf('/pluginTheme.css'));
-  assert.match(head, /<script src="\/pluginBridge\.js"><\/script>/);
+  assert.match(head, /<script src="\.\.\/\.\.\/\.\.\/\.\.\/pluginBridge\.js"><\/script>/);
+  assert.match(head, /<link rel="stylesheet" href="\.\.\/\.\.\/\.\.\/\.\.\/pluginTheme\.css">/);
   assert.match(head, /href="\.\.\/\.\.\/_page\/page\.css"/);
   assert.match(head, /src="\.\.\/\.\.\/_page\/theme-init\.js"/);
   assert.match(head, /src="\.\.\/\.\.\/_page\/nav\.js"/);
